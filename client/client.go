@@ -3,7 +3,6 @@ package client
 import (
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 )
@@ -31,13 +30,15 @@ func NewClient(host, token *string) (*Client, error) {
 	return &c, nil
 }
 
+const logRespMsg = `DEBUG: Response %s/%s Details:
+---[ RESPONSE ]--------------------------------------
+%s
+-----------------------------------------------------`
+
 func (c *Client) doRequest(req *http.Request) ([]byte, error) {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-
-	log.Printf("[INFO] [LARAVELFORGE] [doRequest] Request %#v", req)
-	log.Printf("[INFO] [LARAVELFORGE] [doRequest] URL %s", c.HostURL)
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -46,7 +47,6 @@ func (c *Client) doRequest(req *http.Request) ([]byte, error) {
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
-	//log.Printf("[INFO] [LARAVELFORGE] [doRequest] Body: %v", string(body))
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +62,6 @@ func (c *Client) doRequestEmptyBody(req *http.Request) error {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
-
-	log.Printf("[INFO] [LARAVELFORGE] [doRequest] Request %#v", req)
-	log.Printf("[INFO] [LARAVELFORGE] [doRequest] URL %s", c.HostURL)
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {

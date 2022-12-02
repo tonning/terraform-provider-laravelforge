@@ -99,7 +99,8 @@ func resourceSiteRead(ctx context.Context, d *schema.ResourceData, m interface{}
 	site, err := c.GetSite(serverId, siteId)
 	log.Printf("[INFO] [LARAVELFORGE:resourceSiteRead] ID: %s Site: %#v", siteId, site)
 	if err != nil {
-		return diag.FromErr(err)
+		d.SetId("")
+		return diags
 	}
 
 	d.SetId(strconv.Itoa(site.ID))

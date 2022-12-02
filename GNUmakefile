@@ -5,7 +5,7 @@ NAME=laravelforge
 BINARY=terraform-provider-${NAME}
 VERSION=1.0
 OS_ARCH=darwin_arm64
-LOCALPATH=/Users/tonning/Code/infrastructure/helixsleep/stratasphere/laravelforge
+LOCALPATH=/Users/tonning/Code/infrastructure/helixsleep/stratasphere
 
 default: install
 
@@ -32,8 +32,10 @@ install: build
 
 dev: install
 	rm ${LOCALPATH}/.terraform.lock.hcl
+	#rm ${LOCALPATH}/terraform.tfstate
+	cd ${LOCALPATH} && terraform init
+	#cd ${LOCALPATH} && terraform init && terraform plan
 #	cd ${LOCALPATH} && terraform init && terraform apply -auto-approve
-	cd ${LOCALPATH} && terraform init && terraform plan
 
 test: 
 	go test -i $(TEST) || exit 1                                                   

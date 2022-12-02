@@ -7,16 +7,41 @@ type User struct {
 
 type Server struct {
 	ID               int    `json:"id,omitempty"`
-	CredentialId     int    `json:"credential_id"`
 	Name             string `json:"name"`
-	Size             string `json:"size"`
-	Region           string `json:"region"`
+	Type             string `json:"type"`
 	PhpVersion       string `json:"php_version"`
-	DatabaseType     string `json:"database_type"`
 	IpAddress        string `json:"ip_address"`
 	PrivateIpAddress string `json:"private_ip_address"`
-	CreatedAt        string `json:"created_at"`
 	IsReady          bool   `json:"is_ready"`
+	//CredentialId     int    `json:"credential_id"`
+	//Size             string `json:"size"`
+	//Region           string `json:"region"`
+	//DatabaseType     string `json:"database_type"`
+	//CreatedAt        string `json:"created_at"`
+}
+
+type ServerResponse struct {
+	Server           Server `json:"server"`
+	ProvisionCommand string `json:"provision_command"`
+	SudoPassword     string `json:"sudo_password"`
+}
+
+type ServerCreateRequest struct {
+	Name             string `json:"name"`
+	Provider         string `json:"provider"`
+	Type             string `json:"type"`
+	UbuntuVersion    string `json:"ubuntu_version"`
+	PhpVersion       string `json:"php_version"`
+	IpAddress        string `json:"ip_address"`
+	PrivateIpAddress string `json:"private_ip_address"`
+}
+
+type ServerUpdateRequest struct {
+	Name             string `json:"name"`
+	IpAddress        string `json:"ip_address"`
+	PrivateIpAddress string `json:"private_ip_address"`
+	//MaxUploadSize    int    `json:"max_upload_size"`
+	//Timezone         string `json:"timezone"`
 }
 
 type SiteGet struct {
@@ -51,17 +76,6 @@ type SiteUpdateRequest struct {
 
 type SiteUpdatePhpVersion struct {
 	Version string `json:"version"`
-}
-
-type ServerCreateRequest struct {
-	Provider string `json:"provider"`
-	Type     string `json:"type"`
-	Name     string `json:"name"`
-	//Size             string `json:"size"`
-	UbuntuVersion    string `json:"ubuntu_version"`
-	PhpVersion       string `json:"php_version"`
-	IpAddress        string `json:"ip_address"`
-	PrivateIpAddress string `json:"private_ip_address"`
 }
 
 type SiteItem struct {
