@@ -33,14 +33,14 @@ func (c *Client) GetSite(serverId string, siteId string) (*Site, error) {
 	return &site.Site, nil
 }
 
-func (c *Client) CreateSite(createSite *SiteCreateRequest) (*Site, diag.Diagnostics) {
+func (c *Client) CreateSite(serverId string, createSite *SiteCreateRequest) (*Site, diag.Diagnostics) {
 	log.Printf("[INFO] [LARAVELFORGE:CreateSite]")
 	rb, err := json.Marshal(createSite)
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/612271/sites", c.HostURL), strings.NewReader(string(rb)))
+	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/sites", c.HostURL, serverId), strings.NewReader(string(rb)))
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}

@@ -53,9 +53,10 @@ func resourceServer() *schema.Resource {
 				Computed: true,
 			},
 			"sudo_password": {
-				Type:     schema.TypeString,
-				Required: false,
-				Computed: true,
+				Type:      schema.TypeString,
+				Required:  false,
+				Computed:  true,
+				Sensitive: true,
 			},
 		},
 		CreateContext: resourceServerCreate,
@@ -124,22 +125,27 @@ func resourceServerRead(ctx context.Context, d *schema.ResourceData, m interface
 
 	return diags
 }
+
 func resourceServerUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	log.Printf("[INFO] [LARAVELFORGE:resourceServerUpdate] Start")
 	client := m.(*lf.Client)
 	serverId := d.Id()
+	log.Printf("[INFO] [LARAVELFORGE:resourceServerUpdate] Start 2")
 
 	serverUpdates := lf.ServerUpdateRequest{
-		Name:             d.Get("domain").(string),
+		Name:             d.Get("name").(string),
 		IpAddress:        d.Get("ip_address").(string),
 		PrivateIpAddress: d.Get("private_ip_address").(string),
 	}
+
+	log.Printf("[INFO] [LARAVELFORGE:resourceServerUpdate] server updates: %#v", serverUpdates)
 
 	_, err := client.UpdateServer(serverId, serverUpdates)
 	if err != nil {
 		return err
 	}
 
-	return resourceSiteRead(ctx, d, m)
+	return resourceServerRead(ctx, d, m)
 }
 
 func resourceServerDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {

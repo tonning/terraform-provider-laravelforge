@@ -72,7 +72,9 @@ func resourceSiteCreate(ctx context.Context, d *schema.ResourceData, m interface
 
 	log.Printf("[DEBUG] Site create configuration: %#v", opts)
 
-	site, err := client.CreateSite(opts)
+	serverId := d.Get("server_id").(string)
+
+	site, err := client.CreateSite(serverId, opts)
 
 	if err != nil {
 		return err
