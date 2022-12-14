@@ -88,3 +88,21 @@ type SiteItem struct {
 	IpAddress        string `json:"ip_address"`
 	PrivateIpAddress string `json:"private_ip_address"`
 }
+
+type Key struct {
+	Id        int    `json:"id"`
+	Name      string `json:"name"`
+	Username  string `json:"username"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
+type KeyGet struct {
+	Key Key `json:"key"`
+}
+
+type KeyCreateRequest struct {
+	Name     string `json:"name"`
+	Key      string `json:"key"`
+	Username string `json:"username"`
+}

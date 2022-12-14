@@ -21,6 +21,7 @@ func Provider() *schema.Provider {
 		ResourcesMap: map[string]*schema.Resource{
 			"laravelforge_server": resourceServer(),
 			"laravelforge_site":   resourceSite(),
+			"laravelforge_key":    resourceKey(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"laravelforge_site": dataSourceSite(),
