@@ -12,7 +12,7 @@ func (c *Client) GetUser(userID string) (*User, error) {
 		return nil, err
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, err
 	}

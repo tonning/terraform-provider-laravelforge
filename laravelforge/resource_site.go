@@ -40,6 +40,18 @@ func resourceSite() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 			},
+			"aliases": {
+				Type:        schema.TypeList,
+				Description: "A list of domain aliases.",
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+			},
+			"wildcards": {
+				Type:        schema.TypeBool,
+				Description: "Whether to use wildcard sub-domains for the site.",
+				Optional:    true,
+				Default:     false,
+			},
 		},
 	}
 }
@@ -123,10 +135,12 @@ func resourceSiteUpdate(ctx context.Context, d *schema.ResourceData, m interface
 	siteID := d.Id()
 	serverID := d.Get("server_id").(string)
 
-	if d.HasChanges("domain", "directory") {
+	if d.HasChanges("domain", "directory", "aliases", "wildcards") {
 		siteUpdates := lf.SiteUpdateRequest{
 			Name:      d.Get("domain").(string),
 			Directory: d.Get("directory").(string),
+			Aliases:   d.Get("aliases").([]interface{}),
+			Wildcards: d.Get("wildcards").(bool),
 		}
 
 		_, err := client.UpdateSite(serverID, siteID, siteUpdates)

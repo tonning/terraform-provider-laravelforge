@@ -68,7 +68,7 @@ func resourceKeyCreate(ctx context.Context, d *schema.ResourceData, m interface{
 	key, err := client.CreateKey(serverId, opts)
 
 	if err != nil {
-		return err
+		return resourceKeyCreate(ctx, d, m)
 	}
 
 	log.Printf("[INFO] [LARAVELFORGE] Key response: %#v", key)

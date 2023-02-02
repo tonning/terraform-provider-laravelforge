@@ -17,7 +17,7 @@ func (c *Client) GetKey(serverId string, keyId string) (*Key, error) {
 		return nil, err
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, diag.Errorf("Whoopsy: %s", err)
 	}
@@ -67,7 +67,7 @@ func (c *Client) DeleteKey(serverId string, keyId string) error {
 	if err != nil {
 		return err
 	}
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return err
 	}

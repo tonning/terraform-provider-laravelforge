@@ -35,27 +35,27 @@ const logRespMsg = `DEBUG: Response %s/%s Details:
 %s
 -----------------------------------------------------`
 
-func (c *Client) doRequest(req *http.Request) ([]byte, error) {
+func (c *Client) doRequest(req *http.Request) ([]byte, error, *http.Response) {
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.Token))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
 	res, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, err, res
 	}
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, err
+		return nil, err, res
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body)
+		return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body), res
 	}
 
-	return body, err
+	return body, err, res
 }
 
 func (c *Client) doRequestEmptyBody(req *http.Request) error {

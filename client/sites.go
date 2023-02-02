@@ -18,7 +18,7 @@ func (c *Client) GetSite(serverId string, siteId string) (*Site, error) {
 		return nil, err
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (c *Client) CreateSite(serverId string, createSite *SiteCreateRequest) (*Si
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, diag.Errorf("Whoopsy: %s", err)
 	}
@@ -69,7 +69,7 @@ func (c *Client) UpdateSite(serverId string, siteId string, siteUpdates SiteUpda
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
@@ -111,7 +111,7 @@ func (c *Client) DeleteSite(serverId string, siteId string) error {
 	if err != nil {
 		return err
 	}
-	body, err := c.doRequest(req)
+	body, err, _ := c.doRequest(req)
 	if err != nil {
 		return err
 	}

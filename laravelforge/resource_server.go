@@ -6,6 +6,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"log"
 	"strconv"
+	"time"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -21,9 +22,18 @@ func resourceServer() *schema.Resource {
 				Required: true,
 				ForceNew: true,
 			},
+			"credential_id": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
 			"type": {
 				Type:     schema.TypeString,
 				Required: true,
+				ForceNew: true,
+			},
+			"region": {
+				Type:     schema.TypeString,
+				Optional: true,
 				ForceNew: true,
 			},
 			"ubuntu_version": {
@@ -36,11 +46,28 @@ func resourceServer() *schema.Resource {
 			},
 			"ip_address": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Computed: true,
 			},
 			"private_ip_address": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Computed: true,
+			},
+			"opcache": {
+				Type:     schema.TypeBool,
+				Optional: true,
+				Default:  false,
+			},
+			"ocean2_vpc_uuid": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"network": {
+				Type:        schema.TypeList,
+				Description: "An array of server IDs that the server should be able to connect to.",
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
 			"is_ready": {
 				Type:     schema.TypeBool,
@@ -56,13 +83,21 @@ func resourceServer() *schema.Resource {
 				Type:      schema.TypeString,
 				Required:  false,
 				Computed:  true,
-				Sensitive: true,
+				Sensitive: false,
+			},
+			"public_key": {
+				Type:      schema.TypeString,
+				Computed:  true,
+				Sensitive: false,
 			},
 		},
 		CreateContext: resourceServerCreate,
 		ReadContext:   resourceServerRead,
 		UpdateContext: resourceServerUpdate,
 		DeleteContext: resourceServerDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 	}
 }
 
@@ -76,14 +111,50 @@ func resourceServerCreate(ctx context.Context, d *schema.ResourceData, m interfa
 	opts := &lf.ServerCreateRequest{
 		Name:             d.Get("name").(string),
 		Provider:         d.Get("cloud_provider").(string),
+		CredentialId:     d.Get("credential_id").(string),
 		Type:             d.Get("type").(string),
+		Region:           d.Get("region").(string),
 		UbuntuVersion:    d.Get("ubuntu_version").(string),
 		PhpVersion:       d.Get("php_version").(string),
 		IpAddress:        d.Get("ip_address").(string),
 		PrivateIpAddress: d.Get("private_ip_address").(string),
 	}
 
-	server, err := client.CreateServer(opts)
+	server, err, _ := client.CreateServer(opts)
+	if err != nil {
+		return diag.Errorf("Error: %s", err)
+	}
+
+	log.Printf("[INFO] [LARAVELFORGE:resourceSiteCreate] Server: %#v", server)
+
+	if server == nil {
+		return diag.Errorf("Server not created")
+	}
+
+	serverId := server.Server.ID
+	attempts := 0
+
+	// Wait for status to be other than "installing".
+	for shouldCheck := true; shouldCheck; shouldCheck = server.Server.IsReady {
+		server, err, _ := client.GetServer(strconv.Itoa(serverId))
+		log.Printf("[INFO] [LARAVELFORGE:resourceSiteCreate] Waiting - Attempts: %#v Server: %#v", attempts, server)
+
+		if err != nil {
+			d.SetId("")
+			return diag.FromErr(err)
+		}
+
+		if server.IsReady {
+			break
+		}
+
+		if attempts > 10 {
+			return diag.Errorf("Unable to create server. Too many attempts.")
+		}
+
+		time.Sleep(time.Second * 30)
+		attempts++
+	}
 
 	if err != nil {
 		d.SetId("")
@@ -94,6 +165,13 @@ func resourceServerCreate(ctx context.Context, d *schema.ResourceData, m interfa
 	d.Set("is_ready", server.Server.IsReady)
 	d.Set("provision_command", server.ProvisionCommand)
 	d.Set("sudo_password", server.SudoPassword)
+
+	if d.Get("opcache").(bool) == true {
+		err := client.EnableOpcache(strconv.Itoa(serverId))
+		if err != nil {
+			return err
+		}
+	}
 
 	resourceServerRead(ctx, d, m)
 
@@ -107,8 +185,13 @@ func resourceServerRead(ctx context.Context, d *schema.ResourceData, m interface
 
 	serverId := d.Id()
 
-	server, err := client.GetServer(serverId)
+	server, err, response := client.GetServer(serverId)
 	if err != nil {
+		if response.StatusCode == 404 {
+			d.SetId("")
+
+			return diags
+		}
 		return diag.FromErr(err)
 	}
 
@@ -120,6 +203,7 @@ func resourceServerRead(ctx context.Context, d *schema.ResourceData, m interface
 	d.Set("ip_address", server.IpAddress)
 	d.Set("private_ip_address", server.PrivateIpAddress)
 	d.Set("is_ready", server.IsReady)
+	d.Set("public_key", server.LocalPublicKey)
 
 	log.Printf("[INFO] [LARAVELFORGE:resourceSiteRead] End")
 
@@ -140,9 +224,21 @@ func resourceServerUpdate(ctx context.Context, d *schema.ResourceData, m interfa
 
 	log.Printf("[INFO] [LARAVELFORGE:resourceServerUpdate] server updates: %#v", serverUpdates)
 
-	_, err := client.UpdateServer(serverId, serverUpdates)
+	_, err, _ := client.UpdateServer(serverId, serverUpdates)
 	if err != nil {
 		return err
+	}
+
+	if d.Get("opcache").(bool) == true {
+		err := client.EnableOpcache(serverId)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := client.DisableOpcache(serverId)
+		if err != nil {
+			return err
+		}
 	}
 
 	return resourceServerRead(ctx, d, m)
@@ -155,9 +251,11 @@ func resourceServerDelete(ctx context.Context, d *schema.ResourceData, m interfa
 
 	serverId := d.Id()
 
-	err := c.DeleteServer(serverId)
+	err, res := c.DeleteServer(serverId)
 	if err != nil {
-		return diag.FromErr(err)
+		if res.StatusCode != 404 {
+			return diag.FromErr(err)
+		}
 	}
 
 	d.SetId("")

@@ -19,9 +19,12 @@ func Provider() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"laravelforge_server": resourceServer(),
-			"laravelforge_site":   resourceSite(),
-			"laravelforge_key":    resourceKey(),
+			"laravelforge_server":         resourceServer(),
+			"laravelforge_site":           resourceSite(),
+			"laravelforge_key":            resourceKey(),
+			"laravelforge_sslcertificate": resourceSslCertificate(),
+			"laravelforge_scheduledjob":   resourceScheduledJob(),
+			"laravelforge_daemon":         resourceDaemon(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"laravelforge_site": dataSourceSite(),
