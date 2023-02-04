@@ -51,6 +51,12 @@ func (c *Client) doRequest(req *http.Request) ([]byte, error, *http.Response) {
 		return nil, err, res
 	}
 
+	if res.StatusCode == http.StatusTooManyRequests {
+		time.Sleep(time.Second * 30)
+
+		return c.doRequest(req)
+	}
+
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status: %d, body: %s", res.StatusCode, body), res
 	}

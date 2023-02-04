@@ -131,7 +131,7 @@ func resourceServerCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		return diag.Errorf("Server not created")
 	}
 
-	serverId := server.Server.ID
+	serverId := server.Server.Id
 	attempts := 0
 
 	// Wait for status to be other than "installing".
@@ -161,10 +161,11 @@ func resourceServerCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		return diags
 	}
 
-	d.SetId(strconv.Itoa(server.Server.ID))
+	d.SetId(strconv.Itoa(server.Server.Id))
 	d.Set("is_ready", server.Server.IsReady)
 	d.Set("provision_command", server.ProvisionCommand)
 	d.Set("sudo_password", server.SudoPassword)
+	d.Set("public_key", server.Server.LocalPublicKey)
 
 	if d.Get("opcache").(bool) == true {
 		err := client.EnableOpcache(strconv.Itoa(serverId))
@@ -195,7 +196,7 @@ func resourceServerRead(ctx context.Context, d *schema.ResourceData, m interface
 		return diag.FromErr(err)
 	}
 
-	d.SetId(strconv.Itoa(server.ID))
+	d.SetId(strconv.Itoa(server.Id))
 
 	d.Set("name", server.Name)
 	d.Set("type", server.Type)

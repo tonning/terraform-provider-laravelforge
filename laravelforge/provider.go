@@ -27,7 +27,8 @@ func Provider() *schema.Provider {
 			"laravelforge_daemon":         resourceDaemon(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"laravelforge_site": dataSourceSite(),
+			"laravelforge_site":   dataSourceSite(),
+			"laravelforge_server": dataSourceServer(),
 		},
 		ConfigureContextFunc: providerConfigure,
 	}

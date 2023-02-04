@@ -31,6 +31,7 @@ install: build
 	mv ${BINARY} ~/.terraform.d/plugins/${HOSTNAME}/${NAMESPACE}/${NAME}/${VERSION}/${OS_ARCH}
 
 dev: install
+	go generate ./...
 	rm -f ${LOCALPATH}/.terraform.lock.hcl
 	#rm ${LOCALPATH}/terraform.tfstate
 	cd ${LOCALPATH} && terraform init

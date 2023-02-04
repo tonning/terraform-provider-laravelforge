@@ -6,19 +6,38 @@ type User struct {
 }
 
 type Server struct {
-	ID               int    `json:"id,omitempty"`
+	Id               int    `json:"id"`
+	CredentialId     string `json:"credential_id"`
 	Name             string `json:"name"`
 	Type             string `json:"type"`
+	Provider         string `json:"provider"`
+	ProviderId       string `json:"provider_id"`
+	Size             string `json:"size"`
+	Region           string `json:"region"`
+	UbuntuVersion    string `json:"ubuntu_version"`
+	DbStatus         string `json:"db_status"`
+	RedisStatus      string `json:"redis_status"`
 	PhpVersion       string `json:"php_version"`
+	PhpCliVersion    string `json:"php_cli_version"`
+	DatabaseType     string `json:"database_type"`
 	IpAddress        string `json:"ip_address"`
+	SshPort          int    `json:"ssh_port"`
 	PrivateIpAddress string `json:"private_ip_address"`
-	IsReady          bool   `json:"is_ready"`
 	LocalPublicKey   string `json:"local_public_key"`
-	//CredentialId     int    `json:"credential_id"`
-	//Size             string `json:"size"`
-	//Region           string `json:"region"`
-	//DatabaseType     string `json:"database_type"`
-	//CreatedAt        string `json:"created_at"`
+	BlackfireStatus  string `json:"blackfire_status"`
+	PapertrailStatus string `json:"papertrail_status"`
+	Revoked          bool   `json:"revoked"`
+	CreatedAt        string `json:"created_at"`
+	IsReady          bool   `json:"is_ready"`
+	//Tags             []interface{} `json:"tags"`
+	//PhpVersions      []struct {
+	//	Id                 int    `json:"id"`
+	//	Version            string `json:"version"`
+	//	Status             string `json:"status"`
+	//	DisplayableVersion string `json:"displayable_version"`
+	//	BinaryName         string `json:"binary_name"`
+	//} `json:"php_versions"`
+	//Network []int `json:"network"`
 }
 
 type ServerResponse struct {
