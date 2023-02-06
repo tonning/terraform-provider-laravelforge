@@ -10,22 +10,22 @@ import (
 	"strings"
 )
 
-func (c *Client) GetScheduledJob(serverId string, jobId string) (*ScheduledJob, error) {
+func (c *Client) GetScheduledJob(serverId string, jobId string) (*ScheduledJob, diag.Diagnostics) {
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/jobs/%s", c.HostURL, serverId, jobId), nil)
 	log.Printf("[INFO] [LARAVELFORGE:GetScheduledJob] SiteId: %s", jobId)
 	if err != nil {
-		return nil, err
+		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
 	body, err, _ := c.doRequest(req)
 	if err != nil {
-		return nil, err
+		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
 	job := ScheduledJobResponse{}
 	err = json.Unmarshal(body, &job)
 	if err != nil {
-		return nil, err
+		return nil, diag.Errorf("Whoops: %s", err)
 	}
 	log.Printf("[INFO] [LARAVELFORGE:GetScheduledJob] Job: %#v, Body: %#v", &job, body)
 

@@ -141,12 +141,12 @@ func resourceScheduledJobCreate(ctx context.Context, d *schema.ResourceData, m i
 
 	// Wait for status to be other than "installing".
 	for shouldCheck := true; shouldCheck; shouldCheck = job.Status == "installing" {
-		job, err := client.GetScheduledJob(serverId, strconv.Itoa(jobId))
+		job, err = client.GetScheduledJob(serverId, strconv.Itoa(jobId))
 		log.Printf("[INFO] [LARAVELFORGE] Scheduled Job waiting: %#v", job)
 
 		if err != nil {
 			d.SetId("")
-			return diag.FromErr(err)
+			return err
 		}
 
 		if job.Status == "installed" {
