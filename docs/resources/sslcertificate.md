@@ -23,10 +23,13 @@ description: |-
 
 ### Optional
 
+- `activate` (Boolean) Should activate the new SSL certificate finished installing.
+- `certificate` (String)
 - `certificate_id` (Number)
 - `dns_provider` (String)
 - `domains` (List of String)
 - `keep_existing_on_delete` (Boolean)
+- `key` (String)
 - `token` (String, Sensitive)
 
 ### Read-Only

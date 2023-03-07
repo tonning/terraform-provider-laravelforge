@@ -70,7 +70,35 @@ func (c *Client) CloneExistingSslCertificate(serverId string, siteId string, req
 
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/servers/%s/sites/%s/certificates", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
 	log.Printf("[INFO] [LARAVELFORGE:CloneExistingSslCertificate] Certificate request: %#v, rb: %#v", req, strings.NewReader(string(rb)))
-	//return nil, nil
+
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
+	body, err, _ := c.doRequest(req)
+	if err != nil {
+		return nil, diag.Errorf("Whoopsy: %s", err)
+	}
+
+	certificate := CertificateResponse{}
+	err = json.Unmarshal(body, &certificate)
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
+	return &certificate.Certificate, nil
+}
+
+func (c *Client) InstallExistingSslCertificate(serverId string, siteId string, request *SslCertificateInstallExistingRequest) (*Certificate, diag.Diagnostics) {
+	log.Printf("[INFO] [LARAVELFORGE:InstallExistingSslCertificate]")
+	rb, err := json.Marshal(request)
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/servers/%s/sites/%s/certificates", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
+	log.Printf("[INFO] [LARAVELFORGE:InstallExistingSslCertificate] Certificate request: %#v, rb: %#v", req, strings.NewReader(string(rb)))
+
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}

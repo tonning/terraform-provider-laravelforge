@@ -25,6 +25,7 @@ func Provider() *schema.Provider {
 			"laravelforge_sslcertificate": resourceSslCertificate(),
 			"laravelforge_scheduledjob":   resourceScheduledJob(),
 			"laravelforge_daemon":         resourceDaemon(),
+			"laravelforge_redirectrule":   resourceRedirectRule(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"laravelforge_site":   dataSourceSite(),

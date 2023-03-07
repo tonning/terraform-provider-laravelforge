@@ -36,10 +36,21 @@ func resourceSslCertificate() *schema.Resource {
 				ValidateFunc: validation.StringInSlice([]string{
 					"letsencrypt",
 					"clone",
+					"existing",
 				}, true),
 			},
 			"certificate_id": {
 				Type:     schema.TypeInt,
+				Optional: true,
+				ForceNew: true,
+			},
+			"certificate": {
+				Type:     schema.TypeString,
+				Optional: true,
+				ForceNew: true,
+			},
+			"key": {
+				Type:     schema.TypeString,
 				Optional: true,
 				ForceNew: true,
 			},
@@ -63,6 +74,12 @@ func resourceSslCertificate() *schema.Resource {
 					"digitalocean",
 				}, true),
 				Optional: true,
+			},
+			"activate": {
+				Description: "Should activate the new SSL certificate finished installing.",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     true,
 			},
 			"keep_existing_on_delete": {
 				Type:     schema.TypeBool,
@@ -116,13 +133,35 @@ func resourceSslCertificateCreate(ctx context.Context, d *schema.ResourceData, m
 		log.Printf("[DEBUG] SSL Certificate create configuration: %#v", opts)
 
 		certificate, err = client.ObtainLetsEncryptSslCertificate(serverId, siteId, opts)
+		log.Printf("[DEBUG] SSL Certificate creation LETSENCRYPT: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
 	} else if certificateType == "clone" {
 		opts := &lf.SslCertificateCloneRequest{
 			Type:          "clone",
 			CertificateId: d.Get("certificate_id").(int),
 		}
+		log.Printf("[DEBUG] SSL Certificate create configuration CLONE: %#v", opts)
 
 		certificate, err = client.CloneExistingSslCertificate(serverId, siteId, opts)
+		log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
+	} else if certificateType == "existing" {
+		opts := &lf.SslCertificateInstallExistingRequest{
+			Type:        "existing",
+			Certificate: d.Get("certificate").(string),
+			Key:         d.Get("key").(string),
+		}
+		log.Printf("[DEBUG] SSL Certificate create configuration CLONE: %#v", opts)
+
+		certificate, err = client.InstallExistingSslCertificate(serverId, siteId, opts)
+		d.Set("type", "existing")
+		d.Set("certificate", d.Get("certificate"))
+		d.Set("key", d.Get("key"))
+		log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
+	}
+
+	log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
+
+	if err != nil {
+		return err
 	}
 
 	certificateId := certificate.Id
@@ -154,29 +193,31 @@ func resourceSslCertificateCreate(ctx context.Context, d *schema.ResourceData, m
 		return err
 	}
 
-	attempts = 0
+	if d.Get("activate").(bool) == true {
+		// Wait for status to be other than "installing".
+		client.ActivateCertificate(serverId, siteId, strconv.Itoa(certificateId))
 
-	// Wait for status to be other than "installing".
-	client.ActivateCertificate(serverId, siteId, strconv.Itoa(certificateId))
+		attempts = 0
 
-	for shouldCheck := true; shouldCheck; shouldCheck = certificate.Active == true {
-		certificate, err := client.GetCertificate(serverId, siteId, strconv.Itoa(certificateId))
-		log.Printf("[INFO] [LARAVELFORGE] SSL Activation waiting: %#v", certificate)
+		for shouldCheck := true; shouldCheck; shouldCheck = certificate.Active == true {
+			certificate, err := client.GetCertificate(serverId, siteId, strconv.Itoa(certificateId))
+			log.Printf("[INFO] [LARAVELFORGE] SSL Activation waiting: %#v", certificate)
 
-		if err != nil {
-			return diag.Errorf("Unable to activate the certificate.")
+			if err != nil {
+				return diag.Errorf("Unable to activate the certificate.")
+			}
+
+			if certificate.Active == true {
+				break
+			}
+
+			if attempts > 50 {
+				return diag.Errorf("Unable to activate SSL certificate. Timeout.")
+			}
+
+			time.Sleep(time.Second * 10)
+			attempts++
 		}
-
-		if certificate.Active == true {
-			break
-		}
-
-		if attempts > 50 {
-			return diag.Errorf("Unable to activate SSL certificate. Timeout.")
-		}
-
-		time.Sleep(time.Second * 10)
-		attempts++
 	}
 
 	log.Printf("[INFO] [LARAVELFORGE] SSL Certificate response: %#v", certificate)
@@ -196,48 +237,36 @@ func resourceSslCertificateRead(ctx context.Context, d *schema.ResourceData, m i
 
 	serverId := d.Get("server_id").(string)
 	siteId := d.Get("site_id").(string)
-	certificateId := d.Id()
-	isImporting := false
+	//certType := d.Get("type").(string)
+	//cert := d.Get("certificate").(string)
+	//keep := d.Get("keep_existing_on_delete").(bool)
 
-	if strings.Contains(certificateId, ".") {
+	//log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] serverId: %s, Type: %#v, Certificate: %#v, Keep: %#v", serverId, certType, cert, keep)
+
+	Id := d.Id()
+	isImporting := false
+	certificateType := d.Get("type")
+	certificateId := d.Get("certificate_id")
+
+	if strings.Contains(Id, ".") {
 		isImporting = true
-		parts := strings.Split(certificateId, ".")
+		parts := strings.Split(Id, ".")
 		serverId = parts[0]
 		siteId = parts[1]
-		certificateId = parts[2]
+		Id = parts[2]
+		certificateType = parts[3]
+		certificateId, _ = strconv.Atoi(parts[4])
+		log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Server ID: %s, Site ID: %s, Type: %s, CertId: %s", Id, serverId, siteId, certificateType, certificateId)
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Server ID: %s, Site ID: %s", certificateId, serverId, siteId)
+	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Server ID: %s, Site ID: %s", Id, serverId, siteId)
 
-	certificate, err := c.GetCertificate(serverId, siteId, certificateId)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Certificate: %#v", certificateId, certificate)
+	certificate, err := c.GetCertificate(serverId, siteId, Id)
+	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Certificate: %#v", Id, certificate)
 	if err != nil {
 		d.SetId("")
 		return diags
 	}
-
-	////domainsDoNotMatch := certificate.Domain != d.Get("domains").(string)
-	////log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains do not match: %b", domainsDoNotMatch)
-	////log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains: %s", certificate.Domain)
-	//domains := ""
-	//for index, domain := range d.Get("domains").([]interface{}) {
-	//	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domain: %s", domain)
-	//	if index == 0 {
-	//		domains = domain.(string)
-	//	} else {
-	//		domains = domains + "," + domain.(string)
-	//	}
-	//}
-	//log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains: %s", domains)
-	//log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Given Domains: %s, Read Domains: %s", domains, certificate.Domain)
-	//if domains == certificate.Domain {
-	//	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains Equal")
-	//} else {
-	//	d.SetId("")
-	//	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains Not Equal")
-	//
-	//	return resourceSslCertificateCreate(ctx, d, m)
-	//}
 
 	d.SetId(strconv.Itoa(certificate.Id))
 
@@ -255,6 +284,9 @@ func resourceSslCertificateRead(ctx context.Context, d *schema.ResourceData, m i
 	if isImporting == true {
 		d.Set("server_id", serverId)
 		d.Set("site_id", siteId)
+		d.Set("type", certificateType)
+		d.Set("certificate_id", certificateId)
+		log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead:importSet] ID: %s Server ID: %s, Site ID: %s, Type: %s, CertId: %s", Id, serverId, siteId, certificateType, certificateId)
 	}
 
 	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] End")

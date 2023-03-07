@@ -14,6 +14,9 @@ func resourceKey() *schema.Resource {
 		CreateContext: resourceKeyCreate,
 		ReadContext:   resourceKeyRead,
 		DeleteContext: resourceKeyDelete,
+		Importer: &schema.ResourceImporter{
+			StateContext: schema.ImportStatePassthroughContext,
+		},
 		Schema: map[string]*schema.Schema{
 			"server_id": {
 				Type:     schema.TypeString,
@@ -68,7 +71,7 @@ func resourceKeyCreate(ctx context.Context, d *schema.ResourceData, m interface{
 	key, err := client.CreateKey(serverId, opts)
 
 	if err != nil {
-		return resourceKeyCreate(ctx, d, m)
+		return err
 	}
 
 	log.Printf("[INFO] [LARAVELFORGE] Key response: %#v", key)

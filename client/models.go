@@ -138,6 +138,12 @@ type SslCertificateCloneRequest struct {
 	CertificateId int    `json:"certificate_id"`
 }
 
+type SslCertificateInstallExistingRequest struct {
+	Type        string `json:"type"`
+	Key         string `json:"key"`
+	Certificate string `json:"certificate"`
+}
+
 type SslCertificateCreateRequest struct {
 	Domains     []interface{} `json:"domains"`
 	DnsProvider DnsProvider   `json:"dns_provider"`
@@ -223,4 +229,21 @@ type Daemon struct {
 
 type DaemonResponse struct {
 	Daemon Daemon `json:"daemon"`
+}
+
+type RedirectRule struct {
+	Id        int    `json:"id"`
+	From      string `json:"from"`
+	To        string `json:"to"`
+	Type      string `json:"type"`
+	CreatedAt string `json:"created_at"`
+}
+
+type RedirectRuleResponse struct {
+	RedirectRule RedirectRule `json:"redirect_rule"`
+}
+type CreateRedirectRuleRequest struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+	Type string `json:"type"`
 }
