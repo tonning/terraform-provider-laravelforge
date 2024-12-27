@@ -78,7 +78,7 @@ func resourceKeyCreate(ctx context.Context, d *schema.ResourceData, m interface{
 
 	serverId := d.Get("server_id").(string)
 
-	key, err := client.CreateKey(serverId, opts)
+	key, err := client.CreateKey(serverId, opts, true)
 
 	if err != nil {
 		return err

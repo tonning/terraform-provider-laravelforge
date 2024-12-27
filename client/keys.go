@@ -34,7 +34,7 @@ func (c *Client) GetKey(serverId string, keyId string) (*Key, error) {
 	return &key.Key, nil
 }
 
-func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) (*Key, diag.Diagnostics) {
+func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest, retry bool) (*Key, diag.Diagnostics) {
 	log.Printf("[INFO] [LARAVELFORGE:CreateKey]")
 	rb, err := json.Marshal(keyCreateRequest)
 	if err != nil {
@@ -48,7 +48,7 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 
 	body, err, _ := c.doRequest(req)
 
-	if err != nil && err.Error() == "status: 422, body: {\"name\":[\"The name has already been taken.\"]}" && keyCreateRequest.Overwrite == true {
+	if err != nil && err.Error() == "status: 422, body: {\"name\":[\"The name has already been taken.\"]}" && keyCreateRequest.Overwrite == true && retry == true {
 		log.Printf("[DEBUG] [CreateKey] Key already exists.]")
 		key, searchedKeyErr := c.SearchKeyByName(serverId, keyCreateRequest.Name)
 		log.Printf("[DEBUG] Searched key: %#v, Server ID: %s", key, serverId)
@@ -74,7 +74,7 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 
 		log.Printf("[DEBUG] [CreateKey] about to create new key")
 
-		return c.CreateKey(serverId, keyCreateRequest)
+		return c.CreateKey(serverId, keyCreateRequest, false)
 	}
 
 	if err != nil {
