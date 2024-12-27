@@ -123,6 +123,10 @@ type Key struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type KeysResponse struct {
+	Keys []Key `json:"keys"`
+}
+
 type KeyGet struct {
 	Key Key `json:"key"`
 }

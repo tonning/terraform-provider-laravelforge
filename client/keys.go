@@ -117,30 +117,36 @@ func (c *Client) ListKeys(serverId string) ([]Key, diag.Diagnostics) {
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
+
 	body, err, _ := c.doRequest(req)
+	log.Printf("[DEBUG] [List keys] - body: %#v, Server ID: %s", string(body), serverId)
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
-	var keys []Key
-	err = json.Unmarshal(body, &keys)
-	log.Printf("[DEBUG] List keys: %#v, Server ID: %s", keys, serverId)
+	// Parse the JSON body into the KeysResponse struct
+	var keysResponse KeysResponse
+	err = json.Unmarshal(body, &keysResponse)
 
-	//if err != nil {
-	//	return nil, diag.Errorf("Whoops: %s", err)
-	//}
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
 
-	return keys, nil
+	log.Printf("[DEBUG] [List keys] keys: %#v, Server ID: %s", keysResponse, serverId)
+	return keysResponse.Keys, nil
 }
 
 func (c *Client) SearchKeyByName(serverId string, keyName string) (*Key, diag.Diagnostics) {
 	keys, err := c.ListKeys(serverId)
+
+	log.Printf("[DEBUG] [SearchKeyByName] keys: %#v, Key Name: %s, Server ID: %s", keys, keyName, serverId)
 
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
 
 	for _, key := range keys {
+		log.Printf("[DEBUG] [SearchKeyByName] iteration key: %#v, Key Name: %s", key, keyName)
 		if key.Name == keyName {
 			return &key, nil
 		}
