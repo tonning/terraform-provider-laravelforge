@@ -49,22 +49,37 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 	body, err, _ := c.doRequest(req)
 
 	if err != nil && err.Error() == "status: 422, body: {\"name\":[\"The name has already been taken.\"]}" && keyCreateRequest.Overwrite == true {
-		key, err := c.SearchKeyByName(serverId, keyCreateRequest.Name)
-		if err != nil {
-			return nil, diag.Errorf("Whoops: %s", err)
+		log.Printf("[DEBUG] [CreateKey] Key already exists.]")
+		key, searchedKeyErr := c.SearchKeyByName(serverId, keyCreateRequest.Name)
+		log.Printf("[DEBUG] Searched key: %#v, Server ID: %s", key, serverId)
+
+		if searchedKeyErr != nil {
+			log.Printf("[DEBUG] [CreateKey] error thrown. searchedKeyErr != nil")
+			return nil, diag.Errorf("Whoops: %s", searchedKeyErr)
 		}
 
-		c.DeleteKey(serverId, strconv.Itoa(key.Id))
+		if key != nil {
+			log.Printf("[DEBUG] [CreateKey] about to delete existing key")
+			err := c.DeleteKey(serverId, strconv.Itoa(key.Id))
 
-		time.Sleep(time.Second * 30)
+			if err != nil {
+				log.Printf("[ERROR] [CreateKey] Error deleting key: %s", err)
+				return nil, diag.Errorf("Whoops: %s", err)
+			}
+
+		}
+
+		log.Printf("[DEBUG] [CreateKey] wait 10 seconds")
+		time.Sleep(time.Second * 10)
+		log.Printf("[DEBUG] [CreateKey] waited 10 seconds")
+
+		log.Printf("[DEBUG] [CreateKey] about to create new key")
+		
+		return c.CreateKey(serverId, keyCreateRequest)
 	}
 
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
 	}
 
 	key := KeyGet{}
@@ -81,6 +96,7 @@ func (c *Client) UpdateKey() error {
 }
 
 func (c *Client) DeleteKey(serverId string, keyId string) error {
+	log.Printf("[DEBUG] [DeleteKey] KeyId: %s, Server ID: %s", keyId, serverId)
 	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/servers/%s/keys/%s", c.HostURL, serverId, keyId), nil)
 	if err != nil {
 		return err
@@ -106,12 +122,14 @@ func (c *Client) ListKeys(serverId string) ([]Key, diag.Diagnostics) {
 	if err != nil {
 		return nil, diag.Errorf("Whoops: %s", err)
 	}
-	var keys []Key
 
+	var keys []Key
 	err = json.Unmarshal(body, &keys)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
+	log.Printf("[DEBUG] List keys: %#v, Server ID: %s", keys, serverId)
+
+	//if err != nil {
+	//	return nil, diag.Errorf("Whoops: %s", err)
+	//}
 
 	return keys, nil
 }
@@ -129,5 +147,5 @@ func (c *Client) SearchKeyByName(serverId string, keyName string) (*Key, diag.Di
 		}
 	}
 
-	return nil, diag.Errorf("Key not found")
+	return nil, nil
 }

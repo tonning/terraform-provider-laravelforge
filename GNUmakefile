@@ -3,7 +3,7 @@ HOSTNAME=registry.terraform.io
 NAMESPACE=tonning
 NAME=laravelforge
 BINARY=terraform-provider-${NAME}
-VERSION=1.0
+VERSION=1.0.2
 OS_ARCH=darwin_arm64
 LOCALPATH=/Users/tonning/Code/infrastructure/helixsleep/stratasphere/test
 
