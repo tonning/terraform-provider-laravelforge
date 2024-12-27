@@ -42,6 +42,12 @@ func resourceKey() *schema.Resource {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
+			"overwrite": {
+				Type:     schema.TypeBool,
+				Required: false,
+				Optional: true,
+				ForceNew: true,
+			},
 		},
 	}
 }
@@ -62,6 +68,10 @@ func resourceKeyCreate(ctx context.Context, d *schema.ResourceData, m interface{
 
 	if v, ok := d.GetOk("public_key"); ok {
 		opts.Key = v.(string)
+	}
+
+	if v, ok := d.GetOk("overwrite"); ok {
+		opts.Overwrite = v.(bool)
 	}
 
 	log.Printf("[DEBUG] Key create configuration: %#v", opts)

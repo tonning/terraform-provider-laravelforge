@@ -7,7 +7,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 func (c *Client) GetKey(serverId string, keyId string) (*Key, error) {
@@ -45,6 +47,22 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 	}
 
 	body, err, _ := c.doRequest(req)
+
+	if err != nil && err.Error() == "status: 422, body: {\"name\":[\"The name has already been taken.\"]}" && keyCreateRequest.Overwrite == true {
+		key, err := c.SearchKeyByName(serverId, keyCreateRequest.Name)
+		if err != nil {
+			return nil, diag.Errorf("Whoops: %s", err)
+		}
+
+		c.DeleteKey(serverId, strconv.Itoa(key.Id))
+
+		time.Sleep(time.Second * 30)
+	}
+
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
 	if err != nil {
 		return nil, diag.Errorf("Whoopsy: %s", err)
 	}
@@ -77,4 +95,39 @@ func (c *Client) DeleteKey(serverId string, keyId string) error {
 	}
 
 	return nil
+}
+
+func (c *Client) ListKeys(serverId string) ([]Key, diag.Diagnostics) {
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/keys", c.HostURL, serverId), nil)
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+	body, err, _ := c.doRequest(req)
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+	var keys []Key
+
+	err = json.Unmarshal(body, &keys)
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
+	return keys, nil
+}
+
+func (c *Client) SearchKeyByName(serverId string, keyName string) (*Key, diag.Diagnostics) {
+	keys, err := c.ListKeys(serverId)
+
+	if err != nil {
+		return nil, diag.Errorf("Whoops: %s", err)
+	}
+
+	for _, key := range keys {
+		if key.Name == keyName {
+			return &key, nil
+		}
+	}
+
+	return nil, diag.Errorf("Key not found")
 }

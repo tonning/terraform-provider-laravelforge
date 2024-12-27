@@ -5,7 +5,7 @@ NAME=laravelforge
 BINARY=terraform-provider-${NAME}
 VERSION=1.0
 OS_ARCH=darwin_arm64
-LOCALPATH=/Users/tonning/Code/infrastructure/helixsleep/stratasphere
+LOCALPATH=/Users/tonning/Code/infrastructure/helixsleep/stratasphere/test
 
 default: install
 

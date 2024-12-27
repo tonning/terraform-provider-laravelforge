@@ -22,6 +22,10 @@ description: |-
 - `server_id` (String)
 - `username` (String)
 
+### Optional
+
+- `overwrite` (Boolean)
+
 ### Read-Only
 
 - `id` (String) The ID of this resource.

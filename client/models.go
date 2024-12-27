@@ -128,9 +128,10 @@ type KeyGet struct {
 }
 
 type KeyCreateRequest struct {
-	Name     string `json:"name"`
-	Key      string `json:"key"`
-	Username string `json:"username"`
+	Name      string `json:"name"`
+	Key       string `json:"key"`
+	Username  string `json:"username"`
+	Overwrite bool   `json:"overwrite"`
 }
 
 type SslCertificateCloneRequest struct {
