@@ -66,7 +66,6 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 				log.Printf("[ERROR] [CreateKey] Error deleting key: %s", err)
 				return nil, diag.Errorf("Whoops: %s", err)
 			}
-
 		}
 
 		log.Printf("[DEBUG] [CreateKey] wait 10 seconds")
@@ -74,7 +73,7 @@ func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest) 
 		log.Printf("[DEBUG] [CreateKey] waited 10 seconds")
 
 		log.Printf("[DEBUG] [CreateKey] about to create new key")
-		
+
 		return c.CreateKey(serverId, keyCreateRequest)
 	}
 
