@@ -1,124 +1,153 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"log"
 	"net/http"
-	"strings"
 )
 
-// GetSite - Returns a specific site in a project
-func (c *Client) GetSite(serverId string, siteId string) (*Site, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/sites/%s", c.HostURL, serverId, siteId), nil)
-	log.Printf("[INFO] [LARAVELFORGE:GetSite] SiteId: %s", siteId)
+type Site struct {
+	Id            string
+	Name          string `json:"name"`
+	Status        string `json:"status"`
+	User          string `json:"user"`
+	WebDirectory  string `json:"web_directory"`
+	RootDirectory string `json:"root_directory"`
+	Wildcards     *bool  `json:"wildcards"`
+}
+
+type SiteCreateRequest struct {
+	Domain       string
+	ProjectType  string
+	WebDirectory string
+	Username     string
+	PhpVersion   string
+	Wildcards    bool
+}
+
+type SiteUpdateRequest struct {
+	Directory  string `json:"directory,omitempty"`
+	PhpVersion string `json:"php_version,omitempty"`
+}
+
+type Domain struct {
+	Id                      string
+	Name                    string `json:"name"`
+	Type                    string `json:"type"`
+	Status                  string `json:"status"`
+	WwwRedirectType         string `json:"www_redirect_type"`
+	AllowWildcardSubdomains bool   `json:"allow_wildcard_subdomains"`
+}
+
+func (r *SiteCreateRequest) payload() map[string]interface{} {
+	p := map[string]interface{}{
+		"type":                      r.ProjectType,
+		"domain_mode":               "custom",
+		"name":                      r.Domain,
+		"www_redirect_type":         "none",
+		"allow_wildcard_subdomains": r.Wildcards,
+	}
+
+	if r.WebDirectory != "" {
+		p["web_directory"] = r.WebDirectory
+	}
+	if r.PhpVersion != "" {
+		p["php_version"] = r.PhpVersion
+	}
+	if r.Username != "" && r.Username != "forge" {
+		p["is_isolated"] = true
+		p["isolated_user"] = r.Username
+	}
+
+	return p
+}
+
+func decodeSite(body []byte) (*Site, error) {
+	site := Site{}
+	id, _, err := decodeSingle(body, &site)
+	if err != nil {
+		return nil, err
+	}
+	site.Id = id
+
+	return &site, nil
+}
+
+// GetSite - Returns a specific site
+func (c *Client) GetSite(siteId string) (*Site, error) {
+	body, err := c.do(http.MethodGet, c.orgURL("/sites/%s", siteId), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err, _ := c.doRequest(req)
+	return decodeSite(body)
+}
+
+func (c *Client) CreateSite(serverId string, createSite *SiteCreateRequest) (*Site, error) {
+	body, err := c.do(http.MethodPost, c.orgURL("/servers/%s/sites", serverId), createSite.payload())
 	if err != nil {
 		return nil, err
 	}
 
-	site := SiteGet{}
-	err = json.Unmarshal(body, &site)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("[INFO] [LARAVELFORGE:GetSite] Site: %#v, Body: %#v", &site, body)
-
-	return &site.Site, nil
+	return decodeSite(body)
 }
 
-func (c *Client) CreateSite(serverId string, createSite *SiteCreateRequest) (*Site, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:CreateSite]")
-	rb, err := json.Marshal(createSite)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
+func (c *Client) UpdateSite(serverId string, siteId string, siteUpdates SiteUpdateRequest) error {
+	_, err := c.do(http.MethodPut, c.orgURL("/servers/%s/sites/%s", serverId, siteId), siteUpdates)
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/sites", c.HostURL, serverId), strings.NewReader(string(rb)))
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
-	}
-
-	site := SiteGet{}
-	err = json.Unmarshal(body, &site)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &site.Site, nil
-}
-
-func (c *Client) UpdateSite(serverId string, siteId string, siteUpdates SiteUpdateRequest) (*Site, diag.Diagnostics) {
-	rb, err := json.Marshal(siteUpdates)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/servers/%s/sites/%s", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	site := SiteGet{}
-	err = json.Unmarshal(body, &site)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &site.Site, nil
-}
-
-func (c *Client) UpdateSitePhpVersion(serverId string, siteId string, phpVersion SiteUpdatePhpVersion) (*Site, diag.Diagnostics) {
-	rb, err := json.Marshal(phpVersion)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/servers/%s/sites/%s/php", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	err = c.doRequestEmptyBody(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	site, err := c.GetSite(serverId, siteId)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return site, nil
+	return err
 }
 
 func (c *Client) DeleteSite(serverId string, siteId string) error {
-	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/servers/%s/sites/%s", c.HostURL, serverId, siteId), nil)
+	_, err := c.do(http.MethodDelete, c.orgURL("/servers/%s/sites/%s", serverId, siteId), nil)
+
+	return err
+}
+
+func (c *Client) ListDomains(serverId string, siteId string) ([]Domain, error) {
+	items, err := c.list(c.orgURL("/servers/%s/sites/%s/domains", serverId, siteId), nil)
 	if err != nil {
-		return err
-	}
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return err
+		return nil, err
 	}
 
-	if string(body) != "" {
-		return errors.New(string(body))
+	domains := make([]Domain, 0, len(items))
+	for _, item := range items {
+		domain := Domain{}
+		if err := unmarshalAttributes(item, &domain); err != nil {
+			return nil, err
+		}
+		domain.Id = item.ID
+		domains = append(domains, domain)
 	}
 
-	return nil
+	return domains, nil
+}
+
+func (c *Client) CreateDomain(serverId string, siteId string, name string, wildcards bool) error {
+	payload := map[string]interface{}{
+		"name":                      name,
+		"allow_wildcard_subdomains": wildcards,
+		"www_redirect_type":         "none",
+	}
+	_, err := c.do(http.MethodPost, c.orgURL("/servers/%s/sites/%s/domains", serverId, siteId), payload)
+
+	return err
+}
+
+func (c *Client) UpdateDomain(serverId string, siteId string, domainId string, wwwRedirectType string, wildcards bool) error {
+	if wwwRedirectType == "" {
+		wwwRedirectType = "none"
+	}
+
+	payload := map[string]interface{}{
+		"www_redirect_type":         wwwRedirectType,
+		"allow_wildcard_subdomains": wildcards,
+	}
+	_, err := c.do(http.MethodPatch, c.orgURL("/servers/%s/sites/%s/domains/%s", serverId, siteId, domainId), payload)
+
+	return err
+}
+
+func (c *Client) DeleteDomain(serverId string, siteId string, domainId string) error {
+	_, err := c.do(http.MethodDelete, c.orgURL("/servers/%s/sites/%s/domains/%s", serverId, siteId, domainId), nil)
+
+	return err
 }

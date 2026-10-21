@@ -1,152 +1,148 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
 
+type Key struct {
+	Id     string
+	Name   string `json:"name"`
+	User   string `json:"user"`
+	Status string `json:"status"`
+}
+
+type KeyCreateRequest struct {
+	Name      string
+	Key       string
+	Username  string
+	Overwrite bool
+}
+
 func (c *Client) GetKey(serverId string, keyId string) (*Key, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/keys/%s", c.HostURL, serverId, keyId), nil)
-	log.Printf("[INFO] [LARAVELFORGE:GetKey] KeyID: %s", keyId)
+	body, err := c.do(http.MethodGet, c.orgURL("/servers/%s/ssh-keys/%s", serverId, keyId), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err, _ := c.doRequest(req)
+	key := Key{}
+	id, _, err := decodeSingle(body, &key)
 	if err != nil {
 		return nil, err
 	}
+	key.Id = id
 
-	key := KeyGet{}
-	err = json.Unmarshal(body, &key)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("[INFO] [LARAVELFORGE:GetKey] Key: %#v, Body: %#v", &key, body)
-
-	return &key.Key, nil
+	return &key, nil
 }
 
-func (c *Client) CreateKey(serverId string, keyCreateRequest *KeyCreateRequest, retry bool) (*Key, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:CreateKey]")
-	rb, err := json.Marshal(keyCreateRequest)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+// CreateKey adds an SSH key to a server. The Forge API accepts the request
+// asynchronously and does not return the key, so it is looked up by name.
+func (c *Client) CreateKey(serverId string, req *KeyCreateRequest) (*Key, error) {
+	payload := map[string]interface{}{
+		"name": req.Name,
+		"key":  req.Key,
+	}
+	if req.Username != "" {
+		payload["user"] = req.Username
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/keys", c.HostURL, serverId), strings.NewReader(string(rb)))
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
+	body, err := c.do(http.MethodPost, c.orgURL("/servers/%s/ssh-keys", serverId), payload)
 
-	body, err, _ := c.doRequest(req)
-
-	if err != nil && err.Error() == "status: 422, body: {\"name\":[\"The name has already been taken.\"]}" && keyCreateRequest.Overwrite == true && retry == true {
-		log.Printf("[DEBUG] [CreateKey] Key already exists.]")
-		key, searchedKeyErr := c.SearchKeyByName(serverId, keyCreateRequest.Name)
-		log.Printf("[DEBUG] Searched key: %#v, Server ID: %s", key, serverId)
-
-		if searchedKeyErr != nil {
-			log.Printf("[DEBUG] [CreateKey] error thrown. searchedKeyErr != nil")
-			return nil, diag.Errorf("Whoops: %s", searchedKeyErr)
+	if err != nil && req.Overwrite && isNameTaken(err) {
+		if err := c.deleteKeyByName(serverId, req.Name); err != nil {
+			return nil, err
 		}
 
-		if key != nil {
-			log.Printf("[DEBUG] [CreateKey] about to delete existing key")
-			err := c.DeleteKey(serverId, strconv.Itoa(key.Id))
-
-			if err != nil {
-				log.Printf("[ERROR] [CreateKey] Error deleting key: %s", err)
-				return nil, diag.Errorf("Whoops: %s", err)
-			}
-		}
-
-		log.Printf("[DEBUG] [CreateKey] wait 10 seconds")
-		time.Sleep(time.Second * 10)
-		log.Printf("[DEBUG] [CreateKey] waited 10 seconds")
-
-		log.Printf("[DEBUG] [CreateKey] about to create new key")
-
-		return c.CreateKey(serverId, keyCreateRequest, false)
+		body, err = c.do(http.MethodPost, c.orgURL("/servers/%s/ssh-keys", serverId), payload)
 	}
 
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
-	key := KeyGet{}
-	err = json.Unmarshal(body, &key)
+	key := Key{}
+	id, _, err := decodeSingle(body, &key)
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
-	return &key.Key, nil
+	if id != "" {
+		key.Id = id
+
+		return &key, nil
+	}
+
+	var found *Key
+	err = WaitUntil(2*time.Minute, func() (bool, error) {
+		var err error
+		found, err = c.SearchKeyByName(serverId, req.Name)
+
+		return found != nil, err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
 }
 
-func (c *Client) UpdateKey() error {
-	return nil
+func isNameTaken(err error) bool {
+	apiErr, ok := err.(*APIError)
+
+	return ok && apiErr.StatusCode == http.StatusUnprocessableEntity && strings.Contains(apiErr.Body, "already been taken")
+}
+
+func (c *Client) deleteKeyByName(serverId string, name string) error {
+	key, err := c.SearchKeyByName(serverId, name)
+	if err != nil || key == nil {
+		return err
+	}
+
+	if err := c.DeleteKey(serverId, key.Id); err != nil && !IsNotFound(err) {
+		return err
+	}
+
+	// The deletion is asynchronous, so wait for the name to be released.
+	return WaitUntil(2*time.Minute, func() (bool, error) {
+		found, err := c.SearchKeyByName(serverId, name)
+
+		return found == nil, err
+	})
 }
 
 func (c *Client) DeleteKey(serverId string, keyId string) error {
-	log.Printf("[DEBUG] [DeleteKey] KeyId: %s, Server ID: %s", keyId, serverId)
-	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/servers/%s/keys/%s", c.HostURL, serverId, keyId), nil)
-	if err != nil {
-		return err
-	}
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return err
-	}
+	_, err := c.do(http.MethodDelete, c.orgURL("/servers/%s/ssh-keys/%s", serverId, keyId), nil)
 
-	if string(body) != "" {
-		return errors.New(string(body))
-	}
-
-	return nil
+	return err
 }
 
-func (c *Client) ListKeys(serverId string) ([]Key, diag.Diagnostics) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/keys", c.HostURL, serverId), nil)
+func (c *Client) ListKeys(serverId string) ([]Key, error) {
+	items, err := c.list(c.orgURL("/servers/%s/ssh-keys", serverId), nil)
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
-	body, err, _ := c.doRequest(req)
-	log.Printf("[DEBUG] [List keys] - body: %#v, Server ID: %s", string(body), serverId)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+	keys := make([]Key, 0, len(items))
+	for _, item := range items {
+		key := Key{}
+		if err := unmarshalAttributes(item, &key); err != nil {
+			return nil, err
+		}
+		key.Id = item.ID
+		keys = append(keys, key)
 	}
 
-	// Parse the JSON body into the KeysResponse struct
-	var keysResponse KeysResponse
-	err = json.Unmarshal(body, &keysResponse)
-
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	log.Printf("[DEBUG] [List keys] keys: %#v, Server ID: %s", keysResponse, serverId)
-	return keysResponse.Keys, nil
+	return keys, nil
 }
 
-func (c *Client) SearchKeyByName(serverId string, keyName string) (*Key, diag.Diagnostics) {
+func (c *Client) SearchKeyByName(serverId string, keyName string) (*Key, error) {
 	keys, err := c.ListKeys(serverId)
-
-	log.Printf("[DEBUG] [SearchKeyByName] keys: %#v, Key Name: %s, Server ID: %s", keys, keyName, serverId)
-
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
 	for _, key := range keys {
-		log.Printf("[DEBUG] [SearchKeyByName] iteration key: %#v, Key Name: %s", key, keyName)
 		if key.Name == keyName {
 			return &key, nil
 		}

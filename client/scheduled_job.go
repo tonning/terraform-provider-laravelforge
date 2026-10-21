@@ -1,76 +1,58 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
-	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"log"
 	"net/http"
-	"strings"
 )
 
-func (c *Client) GetScheduledJob(serverId string, jobId string) (*ScheduledJob, diag.Diagnostics) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/jobs/%s", c.HostURL, serverId, jobId), nil)
-	log.Printf("[INFO] [LARAVELFORGE:GetScheduledJob] SiteId: %s", jobId)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	job := ScheduledJobResponse{}
-	err = json.Unmarshal(body, &job)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-	log.Printf("[INFO] [LARAVELFORGE:GetScheduledJob] Job: %#v, Body: %#v", &job, body)
-
-	return &job.Job, nil
+type ScheduledJob struct {
+	Id        string
+	Name      string `json:"name"`
+	Command   string `json:"command"`
+	User      string `json:"user"`
+	Frequency string `json:"frequency"`
+	Cron      string `json:"cron"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
 }
 
-func (c *Client) CreateScheduledJob(serverId string, createJob *CreateScheduledJob) (*ScheduledJob, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:CreateScheduledJob]")
-	rb, err := json.Marshal(createJob)
+type CreateScheduledJob struct {
+	Command   string `json:"command"`
+	Frequency string `json:"frequency"`
+	User      string `json:"user"`
+	Cron      string `json:"cron,omitempty"`
+}
+
+func (c *Client) GetScheduledJob(serverId string, jobId string) (*ScheduledJob, error) {
+	body, err := c.do(http.MethodGet, c.orgURL("/servers/%s/scheduled-jobs/%s", serverId, jobId), nil)
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/jobs", c.HostURL, serverId), strings.NewReader(string(rb)))
+	return decodeScheduledJob(body)
+}
+
+func (c *Client) CreateScheduledJob(serverId string, createJob *CreateScheduledJob) (*ScheduledJob, error) {
+	body, err := c.do(http.MethodPost, c.orgURL("/servers/%s/scheduled-jobs", serverId), createJob)
 	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
+		return nil, err
 	}
 
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
-	}
-
-	job := ScheduledJobResponse{}
-	err = json.Unmarshal(body, &job)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &job.Job, nil
+	return decodeScheduledJob(body)
 }
 
 func (c *Client) DeleteScheduledJob(serverId string, jobId string) error {
-	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/servers/%s/jobs/%s", c.HostURL, serverId, jobId), nil)
-	if err != nil {
-		return err
-	}
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return err
-	}
+	_, err := c.do(http.MethodDelete, c.orgURL("/servers/%s/scheduled-jobs/%s", serverId, jobId), nil)
 
-	if string(body) != "" {
-		return errors.New(string(body))
-	}
+	return err
+}
 
-	return nil
+func decodeScheduledJob(body []byte) (*ScheduledJob, error) {
+	job := ScheduledJob{}
+	id, _, err := decodeSingle(body, &job)
+	if err != nil {
+		return nil, err
+	}
+	job.Id = id
+
+	return &job, nil
 }

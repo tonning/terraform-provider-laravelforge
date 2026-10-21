@@ -2,9 +2,10 @@ package laravelforge
 
 import (
 	"context"
+	"strconv"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"strconv"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -12,23 +13,26 @@ func dataSourceSite() *schema.Resource {
 	return &schema.Resource{
 		ReadContext: dataSourceSiteRead,
 		Schema: map[string]*schema.Schema{
-			"id": &schema.Schema{
+			"id": {
 				Type:     schema.TypeInt,
 				Required: true,
 			},
-			"name": &schema.Schema{
+			"name": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Computed: true,
 			},
-			"username": &schema.Schema{
+			"username": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Computed: true,
 			},
-			"directory": &schema.Schema{
+			"directory": {
 				Type:     schema.TypeString,
-				Required: true,
+				Optional: true,
+				Computed: true,
 			},
-			"status": &schema.Schema{
+			"status": {
 				Type:     schema.TypeString,
 				Computed: true,
 			},
@@ -39,31 +43,18 @@ func dataSourceSite() *schema.Resource {
 func dataSourceSiteRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	serverID := d.Get("server_id").(string)
 	siteID := strconv.Itoa(d.Get("id").(int))
 
-	site, err := c.GetSite(serverID, siteID)
-
+	site, err := c.GetSite(siteID)
 	if err != nil {
 		return diag.FromErr(err)
 	}
 
-	if err := d.Set("Name", site.Name); err != nil {
-		return diag.FromErr(err)
-	}
-	if err := d.Set("Username", site.Username); err != nil {
-		return diag.FromErr(err)
-	}
-	if err := d.Set("Directory", site.Directory); err != nil {
-		return diag.FromErr(err)
-	}
-	if err := d.Set("Status", site.Status); err != nil {
-		return diag.FromErr(err)
-	}
-
 	d.SetId(siteID)
+	d.Set("name", site.Name)
+	d.Set("username", site.User)
+	d.Set("directory", site.WebDirectory)
+	d.Set("status", site.Status)
 
-	return diags
+	return nil
 }

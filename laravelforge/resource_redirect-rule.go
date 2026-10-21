@@ -3,12 +3,11 @@ package laravelforge
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/hashicorp/go-cty/cty"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"log"
-	"strconv"
-	"strings"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -75,104 +74,54 @@ func resourceRedirectRule() *schema.Resource {
 func resourceRedirectRuleCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	log.Printf("[DEBUG] Redirect Rule creation")
 	opts := &lf.CreateRedirectRuleRequest{
 		From: d.Get("from").(string),
 		To:   d.Get("to").(string),
 		Type: d.Get("type").(string),
 	}
 
-	log.Printf("[DEBUG] Redirect Rule configuration: %#v", opts)
-
-	serverId := d.Get("server_id").(string)
-	siteId := d.Get("site_id").(string)
-
-	redirectRule, err := client.CreateRedirectRule(serverId, siteId, opts)
-	//redirectRuleId := redirectRule.Id
-
-	//attempts := 0
-	//
-	//// Wait for status to be other than "installing".
-	//for shouldCheck := true; shouldCheck; shouldCheck = redirectRule.Status == "installing" {
-	//	redirectRule, err = client.GetRedirectRule(serverId, strconv.Itoa(redirectRuleId))
-	//	log.Printf("[INFO] [LARAVELFORGE] Redirect Rule waiting: %#v", redirectRule)
-	//
-	//	if err != nil {
-	//		d.SetId("")
-	//		return err
-	//	}
-	//
-	//	if redirectRule.Status == "installed" {
-	//		break
-	//	}
-	//
-	//	if attempts > 60 {
-	//		return diag.Errorf("Unable to add scheduled redirectRule. Timeout.")
-	//	}
-	//
-	//	time.Sleep(time.Second * 10)
-	//	attempts++
-	//}
-
+	redirectRule, err := client.CreateRedirectRule(d.Get("server_id").(string), d.Get("site_id").(string), opts)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE] Redirect Rule response: %#v", redirectRule)
-	d.SetId(strconv.Itoa(redirectRule.Id))
-	log.Printf("[INFO] [LARAVELFORGE] Redirect Rule ID: %s", strconv.Itoa(redirectRule.Id))
+	d.SetId(redirectRule.Id)
 
-	resourceRedirectRuleRead(ctx, d, m)
-
-	return diags
+	return resourceRedirectRuleRead(ctx, d, m)
 }
 
 func resourceRedirectRuleRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	log.Printf("[INFO] [LARAVELFORGE:resourceRedirectRuleRead] Start")
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	serverId := d.Get("server_id").(string)
-	siteId := d.Get("site_id").(string)
-	redirectRuleId := d.Id()
-
-	redirectRule, err := c.GetRedirectRule(serverId, siteId, redirectRuleId)
-	log.Printf("[INFO] [LARAVELFORGE:resourceRedirectRuleRead] ID: %s Redirect Rule: %#v", redirectRuleId, redirectRule)
+	redirectRule, err := c.GetRedirectRule(d.Get("server_id").(string), d.Get("site_id").(string), d.Id())
 	if err != nil {
-		d.SetId("")
-		return diags
+		if lf.IsNotFound(err) {
+			d.SetId("")
+
+			return nil
+		}
+		return diag.FromErr(err)
 	}
 
-	d.SetId(strconv.Itoa(redirectRule.Id))
+	d.SetId(redirectRule.Id)
 
 	d.Set("from", redirectRule.From)
 	d.Set("to", redirectRule.To)
 	d.Set("type", redirectRule.Type)
 	d.Set("created_at", redirectRule.CreatedAt)
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceRedirectRuleRead] End")
-
-	return diags
+	return nil
 }
 
 func resourceRedirectRuleDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	serverId := d.Get("server_id").(string)
-	siteId := d.Get("site_id").(string)
-	redirectRuleId := d.Id()
-
-	err := c.DeleteRedirectRule(serverId, siteId, redirectRuleId)
-	if err != nil {
+	err := c.DeleteRedirectRule(d.Get("server_id").(string), d.Get("site_id").(string), d.Id())
+	if err != nil && !lf.IsNotFound(err) {
 		return diag.FromErr(err)
 	}
 
 	d.SetId("")
 
-	return diags
+	return nil
 }

@@ -26,11 +26,12 @@ description: |-
 - `activate` (Boolean) Should activate the new SSL certificate finished installing.
 - `certificate` (String)
 - `certificate_id` (Number)
-- `dns_provider` (String)
-- `domains` (List of String)
+- `dns_provider` (String, Deprecated) Ignored. The current Forge API does not accept DNS provider credentials.
+- `domains` (List of String) The domain to issue the certificate for. Forge issues a certificate per domain, so only the first entry is used. Defaults to the primary domain of the site.
 - `keep_existing_on_delete` (Boolean)
 - `key` (String)
-- `token` (String, Sensitive)
+- `token` (String, Sensitive, Deprecated) Ignored. The current Forge API does not accept DNS provider credentials.
+- `verification_method` (String) `http-01` or `dns-01`. Defaults to `dns-01` for domains with wildcard sub-domains, otherwise `http-01`.
 
 ### Read-Only
 

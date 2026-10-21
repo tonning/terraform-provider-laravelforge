@@ -2,13 +2,14 @@ package laravelforge
 
 import (
 	"context"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
-	"log"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -55,17 +56,29 @@ func resourceSslCertificate() *schema.Resource {
 				ForceNew: true,
 			},
 			"domains": {
-				Type:     schema.TypeList,
-				Elem:     &schema.Schema{Type: schema.TypeString},
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeList,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Optional:    true,
+				Computed:    true,
+				ForceNew:    true,
+				Description: "The domain to issue the certificate for. Forge issues a certificate per domain, so only the first entry is used. Defaults to the primary domain of the site.",
+			},
+			"verification_method": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "How a Let's Encrypt certificate is verified: `http-01` or `dns-01`. Defaults to `dns-01` for domains with wildcard sub-domains, otherwise `http-01`.",
+				ValidateFunc: validation.StringInSlice([]string{
+					"http-01",
+					"dns-01",
+				}, false),
 			},
 			"token": {
 				Type:         schema.TypeString,
 				RequiredWith: []string{"dns_provider"},
 				Optional:     true,
 				Sensitive:    true,
+				Deprecated:   "Ignored. The current Laravel Forge API does not accept DNS provider credentials.",
 			},
 			"dns_provider": {
 				Type:         schema.TypeString,
@@ -73,7 +86,8 @@ func resourceSslCertificate() *schema.Resource {
 				ValidateFunc: validation.StringInSlice([]string{
 					"digitalocean",
 				}, true),
-				Optional: true,
+				Optional:   true,
+				Deprecated: "Ignored. The current Laravel Forge API does not accept DNS provider credentials.",
 			},
 			"activate": {
 				Description: "Should activate the new SSL certificate finished installing.",
@@ -85,6 +99,10 @@ func resourceSslCertificate() *schema.Resource {
 				Type:     schema.TypeBool,
 				Optional: true,
 				Default:  false,
+			},
+			"domain_id": {
+				Type:     schema.TypeString,
+				Computed: true,
 			},
 			"active": {
 				Type:     schema.TypeBool,
@@ -107,250 +125,210 @@ func resourceSslCertificate() *schema.Resource {
 			StateContext: schema.ImportStatePassthroughContext,
 		},
 	}
-
 }
 
 func resourceSslCertificateCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	log.Printf("[DEBUG] SSL Certificate creation")
 	client := m.(*lf.Client)
 
 	var diags diag.Diagnostics
-	var certificate *lf.Certificate
-	var err diag.Diagnostics
-	certificateType := d.Get("type").(string)
+
 	serverId := d.Get("server_id").(string)
 	siteId := d.Get("site_id").(string)
+	certificateType := strings.ToLower(d.Get("type").(string))
+	activate := d.Get("activate").(bool)
 
-	if certificateType == "letsencrypt" {
-		opts := &lf.SslCertificateCreateRequest{
-			Domains: d.Get("domains").([]interface{}),
-			DnsProvider: lf.DnsProvider{
-				Type:              d.Get("dns_provider").(string),
-				DigitaloceanToken: d.Get("token").(string),
-			},
-		}
-
-		log.Printf("[DEBUG] SSL Certificate create configuration: %#v", opts)
-
-		certificate, err = client.ObtainLetsEncryptSslCertificate(serverId, siteId, opts)
-		log.Printf("[DEBUG] SSL Certificate creation LETSENCRYPT: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
-	} else if certificateType == "clone" {
-		opts := &lf.SslCertificateCloneRequest{
-			Type:          "clone",
-			CertificateId: d.Get("certificate_id").(int),
-		}
-		log.Printf("[DEBUG] SSL Certificate create configuration CLONE: %#v", opts)
-
-		certificate, err = client.CloneExistingSslCertificate(serverId, siteId, opts)
-		log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
-	} else if certificateType == "existing" {
-		opts := &lf.SslCertificateInstallExistingRequest{
-			Type:        "existing",
-			Certificate: d.Get("certificate").(string),
-			Key:         d.Get("key").(string),
-		}
-		log.Printf("[DEBUG] SSL Certificate create configuration CLONE: %#v", opts)
-
-		certificate, err = client.InstallExistingSslCertificate(serverId, siteId, opts)
-		d.Set("type", "existing")
-		d.Set("certificate", d.Get("certificate"))
-		d.Set("key", d.Get("key"))
-		log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
-	}
-
-	log.Printf("[DEBUG] SSL Certificate creation CLONE: %#v, Server ID: %s, Site ID: %s", certificate, serverId, siteId)
-
+	domains, err := client.ListDomains(serverId, siteId)
 	if err != nil {
-		return err
+		return diag.FromErr(err)
 	}
 
-	certificateId := certificate.Id
-	attempts := 0
+	var domain *lf.Domain
+	requested := d.Get("domains").([]interface{})
+	for i := range domains {
+		if len(requested) > 0 {
+			if name, _ := requested[0].(string); domains[i].Name == name {
+				domain = &domains[i]
+			}
+		} else if domains[i].Type == "primary" {
+			domain = &domains[i]
+		}
+	}
+	if domain == nil {
+		return diag.Errorf("Unable to find the domain to issue the certificate for on site %s", siteId)
+	}
+	if len(requested) > 1 {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Warning,
+			Summary:  "Only one domain per certificate",
+			Detail:   fmt.Sprintf("Laravel Forge issues a certificate per domain. Only %s is used.", domain.Name),
+		})
+	}
 
-	// Wait for status to be other than "installing".
-	for shouldCheck := true; shouldCheck; shouldCheck = certificate.Status == "installing" {
-		certificate, err := client.GetCertificate(serverId, siteId, strconv.Itoa(certificateId))
-		log.Printf("[INFO] [LARAVELFORGE] SSL Certificate waiting: %#v", certificate)
+	opts := &lf.CertificateCreateRequest{
+		Type:   certificateType,
+		Enable: activate,
+	}
 
+	switch certificateType {
+	case "letsencrypt":
+		opts.VerificationMethod = d.Get("verification_method").(string)
+		if opts.VerificationMethod == "" {
+			opts.VerificationMethod = "http-01"
+			if domain.AllowWildcardSubdomains {
+				opts.VerificationMethod = "dns-01"
+			}
+		}
+	case "clone":
+		opts.CloneCertificateId = d.Get("certificate_id").(int)
+	case "existing":
+		opts.ExistingCert = d.Get("certificate").(string)
+		opts.ExistingKey = d.Get("key").(string)
+	}
+
+	certificate, err := client.CreateCertificate(serverId, siteId, domain.Id, opts)
+	if err != nil {
+		return append(diags, diag.FromErr(err)...)
+	}
+	if certificate.Id == "" {
+		return append(diags, diag.Errorf("Certificate not created")...)
+	}
+
+	d.SetId(certificate.Id)
+	d.Set("domain_id", domain.Id)
+
+	activationRequested := false
+	err = lf.WaitUntil(30*time.Minute, func() (bool, error) {
+		current, err := client.GetCertificate(serverId, siteId, domain.Id, certificate.Id)
 		if err != nil {
-			d.SetId("")
-			return diag.FromErr(err)
+			return false, err
 		}
 
-		if certificate.Status == "installed" {
-			break
+		if strings.HasPrefix(current.Status, "failed") {
+			return false, fmt.Errorf("certificate installation failed with status %q", current.Status)
+		}
+		if current.Status != "installed" {
+			return false, nil
+		}
+		if !activate || current.Active {
+			return true, nil
 		}
 
-		if attempts > 50 {
-			return diag.Errorf("Unable to install SSL certificate. Timeout.")
+		if !activationRequested {
+			activationRequested = true
+			if err := client.EnableCertificate(serverId, siteId, domain.Id, certificate.Id); err != nil {
+				return false, err
+			}
 		}
 
-		time.Sleep(time.Second * 10)
-		attempts++
-	}
-
+		return false, nil
+	})
 	if err != nil {
-		return err
+		return append(diags, diag.Errorf("Unable to install SSL certificate: %s", err)...)
 	}
 
-	if d.Get("activate").(bool) == true {
-		// Wait for status to be other than "installing".
-		client.ActivateCertificate(serverId, siteId, strconv.Itoa(certificateId))
-
-		attempts = 0
-
-		for shouldCheck := true; shouldCheck; shouldCheck = certificate.Active == true {
-			certificate, err := client.GetCertificate(serverId, siteId, strconv.Itoa(certificateId))
-			log.Printf("[INFO] [LARAVELFORGE] SSL Activation waiting: %#v", certificate)
-
-			if err != nil {
-				return diag.Errorf("Unable to activate the certificate.")
-			}
-
-			if certificate.Active == true {
-				break
-			}
-
-			if attempts > 50 {
-				return diag.Errorf("Unable to activate SSL certificate. Timeout.")
-			}
-
-			time.Sleep(time.Second * 10)
-			attempts++
-		}
-	}
-
-	log.Printf("[INFO] [LARAVELFORGE] SSL Certificate response: %#v", certificate)
-	d.SetId(strconv.Itoa(certificate.Id))
-	log.Printf("[INFO] [LARAVELFORGE] SSL Certificate ID: %s", strconv.Itoa(certificate.Id))
-
-	resourceSslCertificateRead(ctx, d, m)
-
-	return diags
+	return append(diags, resourceSslCertificateRead(ctx, d, m)...)
 }
 
 func resourceSslCertificateRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Start")
 	c := m.(*lf.Client)
-
-	var diags diag.Diagnostics
 
 	serverId := d.Get("server_id").(string)
 	siteId := d.Get("site_id").(string)
-	//certType := d.Get("type").(string)
-	//cert := d.Get("certificate").(string)
-	//keep := d.Get("keep_existing_on_delete").(bool)
+	id := d.Id()
 
-	//log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] serverId: %s, Type: %#v, Certificate: %#v, Keep: %#v", serverId, certType, cert, keep)
-
-	Id := d.Id()
 	isImporting := false
-	certificateType := d.Get("type")
-	certificateId := d.Get("certificate_id")
+	var importedType string
+	var importedCertificateId int
 
-	if strings.Contains(Id, ".") {
+	// Imports use the format server.site.id.type.certificate_id.
+	if strings.Contains(id, ".") {
+		parts := strings.Split(id, ".")
+		if len(parts) != 5 {
+			return diag.Errorf("Invalid import ID %q, expected server_id.site_id.id.type.certificate_id", id)
+		}
 		isImporting = true
-		parts := strings.Split(Id, ".")
-		serverId = parts[0]
-		siteId = parts[1]
-		Id = parts[2]
-		certificateType = parts[3]
-		certificateId, _ = strconv.Atoi(parts[4])
-		log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Server ID: %s, Site ID: %s, Type: %s, CertId: %s", Id, serverId, siteId, certificateType, certificateId)
+		serverId, siteId, id, importedType = parts[0], parts[1], parts[2], parts[3]
+		importedCertificateId, _ = strconv.Atoi(parts[4])
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Server ID: %s, Site ID: %s", Id, serverId, siteId)
-
-	certificate, err := c.GetCertificate(serverId, siteId, Id)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] ID: %s Certificate: %#v", Id, certificate)
+	var certificate *lf.Certificate
+	var err error
+	if domainId := d.Get("domain_id").(string); domainId != "" && !isImporting {
+		certificate, err = c.GetCertificate(serverId, siteId, domainId, id)
+	} else {
+		certificate, err = c.FindCertificate(serverId, siteId, id)
+	}
 	if err != nil {
-		d.SetId("")
-		return diags
+		if lf.IsNotFound(err) {
+			d.SetId("")
+
+			return nil
+		}
+		return diag.FromErr(err)
 	}
 
-	d.SetId(strconv.Itoa(certificate.Id))
-
-	domains := strings.Split(certificate.Domain, ",")
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Read Domains: %#v", domains)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Read Domains: %s", domains)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Current Domains: %s", d.Get("domains"))
-	d.Set("domains", domains)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] Domains after set: %s", d.Get("domains"))
+	d.SetId(certificate.Id)
+	d.Set("domain_id", certificate.DomainId)
 	d.Set("request_status", certificate.RequestStatus)
 	d.Set("created_at", certificate.CreatedAt)
-	d.Set("existing", certificate.Existing)
+	d.Set("existing", certificate.Type == "existing")
 	d.Set("active", certificate.Active)
 
-	if isImporting == true {
-		d.Set("server_id", serverId)
-		d.Set("site_id", siteId)
-		d.Set("type", certificateType)
-		d.Set("certificate_id", certificateId)
-		log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead:importSet] ID: %s Server ID: %s, Site ID: %s, Type: %s, CertId: %s", Id, serverId, siteId, certificateType, certificateId)
+	if len(d.Get("domains").([]interface{})) == 0 {
+		if domains, err := c.ListDomains(serverId, siteId); err == nil {
+			for _, domain := range domains {
+				if domain.Id == certificate.DomainId {
+					d.Set("domains", []string{domain.Name})
+				}
+			}
+		}
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateRead] End")
+	if isImporting {
+		d.Set("server_id", serverId)
+		d.Set("site_id", siteId)
+		d.Set("type", importedType)
+		d.Set("certificate_id", importedCertificateId)
+	}
 
-	return diags
+	return nil
 }
 
 func resourceSslCertificateUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	//d.SetId("")
-	//client := m.(*lf.Client)
-	//siteID := d.Id()
-	//serverID := d.Get("server_id").(string)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSslCertificateUpdate] ID: %s", d.Get("id"))
-	//
-	//if d.HasChanges("domain", "directory", "aliases", "wildcards") {
-	//	siteUpdates := lf.SiteUpdateRequest{
-	//		Name:      d.Get("domain").(string),
-	//		Directory: d.Get("directory").(string),
-	//		Aliases:   d.Get("aliases").([]interface{}),
-	//		Wildcards: d.Get("wildcards").(bool),
-	//	}
-	//
-	//	_, err := client.UpdateSite(serverID, siteID, siteUpdates)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	//
-	//if d.HasChange("php_version") {
-	//	versionUpdate := lf.SiteUpdatePhpVersion{
-	//		Version: d.Get("php_version").(string),
-	//	}
-	//	_, err := client.UpdateSitePhpVersion(serverID, siteID, versionUpdate)
-	//	if err != nil {
-	//		return err
-	//	}
-	//}
-	//
-	//return resourceSslCertificateRead(ctx, d, m)
-	//return resourceSslCertificateCreate(ctx, d, m)
-	return diag.Diagnostics{}
+	return resourceSslCertificateRead(ctx, d, m)
 }
 
 func resourceSslCertificateDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if d.Get("keep_existing_on_delete").(bool) == true {
+	if d.Get("keep_existing_on_delete").(bool) {
 		d.SetId("")
 
-		return diags
+		return nil
 	}
 
 	c := m.(*lf.Client)
 
 	serverId := d.Get("server_id").(string)
 	siteId := d.Get("site_id").(string)
-	certificateId := d.Id()
+	domainId := d.Get("domain_id").(string)
 
-	err := c.DeleteCertificate(serverId, siteId, certificateId)
-	if err != nil {
+	if domainId == "" {
+		certificate, err := c.FindCertificate(serverId, siteId, d.Id())
+		if err != nil {
+			if lf.IsNotFound(err) {
+				d.SetId("")
+
+				return nil
+			}
+			return diag.FromErr(err)
+		}
+		domainId = certificate.DomainId
+	}
+
+	if err := c.DeleteCertificate(serverId, siteId, domainId, d.Id()); err != nil && !lf.IsNotFound(err) {
 		return diag.FromErr(err)
 	}
 
 	d.SetId("")
 
-	return diags
+	return nil
 }

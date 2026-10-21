@@ -1,175 +1,110 @@
 package client
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
-	"log"
 	"net/http"
-	"strings"
 )
 
-func (c *Client) GetCertificate(serverId string, siteId string, certificateId string) (*Certificate, error) {
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/servers/%s/sites/%s/certificates/%s", c.HostURL, serverId, siteId, certificateId), nil)
+type Certificate struct {
+	Id            string
+	DomainId      string
+	Type          string `json:"type"`
+	RequestStatus string `json:"request_status"`
+	Status        string `json:"status"`
+	CreatedAt     string `json:"created_at"`
+	Active        bool   `json:"active"`
+}
 
-	log.Printf("[INFO] [LARAVELFORGE:GetCertificate] Certificate ID: %s", certificateId)
+// CertificateCreateRequest describes a certificate for a single domain of a site.
+type CertificateCreateRequest struct {
+	Type               string
+	Enable             bool
+	VerificationMethod string
+	ExistingKey        string
+	ExistingCert       string
+	CloneCertificateId int
+}
+
+func (r *CertificateCreateRequest) payload() map[string]interface{} {
+	p := map[string]interface{}{
+		"type":   r.Type,
+		"enable": r.Enable,
+	}
+
+	switch r.Type {
+	case "letsencrypt":
+		p["letsencrypt"] = map[string]interface{}{"verification_method": r.VerificationMethod}
+	case "existing":
+		p["existing"] = map[string]interface{}{"key": r.ExistingKey, "certificate": r.ExistingCert}
+	case "clone":
+		p["clone"] = map[string]interface{}{"certificate_id": r.CloneCertificateId}
+	}
+
+	return p
+}
+
+func (c *Client) certificatesURL(serverId, siteId, domainId string) string {
+	return c.orgURL("/servers/%s/sites/%s/domains/%s/certificates", serverId, siteId, domainId)
+}
+
+func decodeCertificate(body []byte, domainId string) (*Certificate, error) {
+	certificate := Certificate{}
+	id, _, err := decodeSingle(body, &certificate)
+	if err != nil {
+		return nil, err
+	}
+	certificate.Id = id
+	certificate.DomainId = domainId
+
+	return &certificate, nil
+}
+
+func (c *Client) GetCertificate(serverId string, siteId string, domainId string, certificateId string) (*Certificate, error) {
+	body, err := c.do(http.MethodGet, c.certificatesURL(serverId, siteId, domainId)+"/"+certificateId, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	body, err, _ := c.doRequest(req)
+	return decodeCertificate(body, domainId)
+}
+
+// FindCertificate locates a certificate by id across all domains of the site.
+func (c *Client) FindCertificate(serverId string, siteId string, certificateId string) (*Certificate, error) {
+	domains, err := c.ListDomains(serverId, siteId)
 	if err != nil {
 		return nil, err
 	}
 
-	certificate := CertificateResponse{}
-	err = json.Unmarshal(body, &certificate)
+	for _, domain := range domains {
+		certificate, err := c.GetCertificate(serverId, siteId, domain.Id, certificateId)
+		if err == nil {
+			return certificate, nil
+		}
+		if !IsNotFound(err) {
+			return nil, err
+		}
+	}
+
+	return nil, &APIError{StatusCode: http.StatusNotFound, Body: fmt.Sprintf("certificate %s not found", certificateId)}
+}
+
+func (c *Client) CreateCertificate(serverId string, siteId string, domainId string, request *CertificateCreateRequest) (*Certificate, error) {
+	body, err := c.do(http.MethodPost, c.certificatesURL(serverId, siteId, domainId), request.payload())
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("[INFO] [LARAVELFORGE:GetCertificate] Certificate: %#v, Body: %#v", &certificate, body)
 
-	return &certificate.Certificate, nil
+	return decodeCertificate(body, domainId)
 }
 
-func (c *Client) ObtainLetsEncryptSslCertificate(serverId string, siteId string, createSslCertificate *SslCertificateCreateRequest) (*Certificate, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:CreateSslCertificate]")
-	rb, err := json.Marshal(createSslCertificate)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
+func (c *Client) EnableCertificate(serverId string, siteId string, domainId string, certificateId string) error {
+	_, err := c.do(http.MethodPost, c.certificatesURL(serverId, siteId, domainId)+"/"+certificateId+"/actions", map[string]string{"action": "enable"})
 
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/sites/%s/certificates/letsencrypt", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-	log.Printf("[INFO] [LARAVELFORGE:GetCertificate] Certificate request: %#v, rb: %#v", req, strings.NewReader(string(rb)))
-	//return nil, nil
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
-	}
-
-	certificate := CertificateResponse{}
-	err = json.Unmarshal(body, &certificate)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &certificate.Certificate, nil
+	return err
 }
 
-func (c *Client) CloneExistingSslCertificate(serverId string, siteId string, request *SslCertificateCloneRequest) (*Certificate, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:CloneExistingSslCertificate]")
-	rb, err := json.Marshal(request)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
+func (c *Client) DeleteCertificate(serverId string, siteId string, domainId string, certificateId string) error {
+	_, err := c.do(http.MethodDelete, c.certificatesURL(serverId, siteId, domainId)+"/"+certificateId, nil)
 
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/servers/%s/sites/%s/certificates", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-	log.Printf("[INFO] [LARAVELFORGE:CloneExistingSslCertificate] Certificate request: %#v, rb: %#v", req, strings.NewReader(string(rb)))
-
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
-	}
-
-	certificate := CertificateResponse{}
-	err = json.Unmarshal(body, &certificate)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &certificate.Certificate, nil
-}
-
-func (c *Client) InstallExistingSslCertificate(serverId string, siteId string, request *SslCertificateInstallExistingRequest) (*Certificate, diag.Diagnostics) {
-	log.Printf("[INFO] [LARAVELFORGE:InstallExistingSslCertificate]")
-	rb, err := json.Marshal(request)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/servers/%s/sites/%s/certificates", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-	log.Printf("[INFO] [LARAVELFORGE:InstallExistingSslCertificate] Certificate request: %#v, rb: %#v", req, strings.NewReader(string(rb)))
-
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return nil, diag.Errorf("Whoopsy: %s", err)
-	}
-
-	certificate := CertificateResponse{}
-	err = json.Unmarshal(body, &certificate)
-	if err != nil {
-		return nil, diag.Errorf("Whoops: %s", err)
-	}
-
-	return &certificate.Certificate, nil
-}
-
-func (c *Client) ActivateCertificate(serverId string, siteId string, certificateId string) diag.Diagnostics {
-	log.Printf("[INFO] [LARAVELFORGE:ActivateCertificate]")
-
-	req, err := http.NewRequest("POST", fmt.Sprintf("%s/servers/%s/sites/%s/certificates/%s/activate", c.HostURL, serverId, siteId, certificateId), nil)
-	if err != nil {
-		return diag.Errorf("Whoops: %s", err)
-	}
-
-	err = c.doRequestEmptyBody(req)
-	if err != nil {
-		return diag.Errorf("Whoopsy: %s", err)
-	}
-
-	return nil
-}
-
-//func (c *Client) UpdateSite(serverId string, siteId string, siteUpdates SiteUpdateRequest) (*Site, diag.Diagnostics) {
-//	rb, err := json.Marshal(siteUpdates)
-//	if err != nil {
-//		return nil, diag.Errorf("Whoops: %s", err)
-//	}
-//	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/servers/%s/sites/%s", c.HostURL, serverId, siteId), strings.NewReader(string(rb)))
-//	if err != nil {
-//		return nil, diag.Errorf("Whoops: %s", err)
-//	}
-//
-//	body, err, _ := c.doRequest(req)
-//	if err != nil {
-//		return nil, diag.Errorf("Whoops: %s", err)
-//	}
-//
-//	site := SiteGet{}
-//	err = json.Unmarshal(body, &site)
-//	if err != nil {
-//		return nil, diag.Errorf("Whoops: %s", err)
-//	}
-//
-//	return &site.Site, nil
-//}
-
-func (c *Client) DeleteCertificate(serverId string, siteId string, certificateId string) error {
-	req, err := http.NewRequest("DELETE", fmt.Sprintf("%s/servers/%s/sites/%s/certificates/%s", c.HostURL, serverId, siteId, certificateId), nil)
-	if err != nil {
-		return err
-	}
-	body, err, _ := c.doRequest(req)
-	if err != nil {
-		return err
-	}
-
-	if string(body) != "" {
-		return errors.New(string(body))
-	}
-
-	return nil
+	return err
 }

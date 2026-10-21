@@ -2,10 +2,12 @@ package laravelforge
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"time"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"log"
-	"strconv"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -17,8 +19,10 @@ func resourceSite() *schema.Resource {
 		DeleteContext: resourceSiteDelete,
 		Schema: map[string]*schema.Schema{
 			"domain": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				Description: "The primary domain of the site. The Forge API does not support renaming it.",
 			},
 			"server_id": {
 				Type:     schema.TypeString,
@@ -52,6 +56,10 @@ func resourceSite() *schema.Resource {
 				Optional:    true,
 				Default:     false,
 			},
+			"status": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 		},
 	}
 }
@@ -59,75 +67,77 @@ func resourceSite() *schema.Resource {
 func resourceSiteCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	log.Printf("[DEBUG] Site creation")
-	opts := &lf.SiteCreateRequest{
-		Domain: d.Get("domain").(string),
-	}
-
-	if v, ok := d.GetOk("username"); ok {
-		opts.Username = v.(string)
-	}
-
-	if v, ok := d.GetOk("directory"); ok {
-		opts.Directory = v.(string)
-	}
-
-	if v, ok := d.GetOk("project_type"); ok {
-		opts.ProjectType = v.(string)
-	}
-
-	if v, ok := d.GetOk("php_version"); ok {
-		opts.PhpVersion = v.(string)
-	}
-
-	log.Printf("[DEBUG] Site create configuration: %#v", opts)
-
 	serverId := d.Get("server_id").(string)
+
+	opts := &lf.SiteCreateRequest{
+		Domain:       d.Get("domain").(string),
+		Username:     d.Get("username").(string),
+		WebDirectory: d.Get("directory").(string),
+		ProjectType:  d.Get("project_type").(string),
+		PhpVersion:   d.Get("php_version").(string),
+		Wildcards:    d.Get("wildcards").(bool),
+	}
 
 	site, err := client.CreateSite(serverId, opts)
-
 	if err != nil {
-		return err
+		return diag.FromErr(err)
+	}
+	if site.Id == "" {
+		return diag.Errorf("Site not created")
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE] Site response: %#v", site)
-	d.SetId(strconv.Itoa(site.ID))
-	log.Printf("[INFO] [LARAVELFORGE] Site ID: %s", strconv.Itoa(site.ID))
+	d.SetId(site.Id)
 
-	resourceSiteRead(ctx, d, m)
+	err = lf.WaitUntil(15*time.Minute, func() (bool, error) {
+		s, err := client.GetSite(site.Id)
+		if err != nil {
+			return false, err
+		}
+		if s.Status == "failed" {
+			return false, fmt.Errorf("the site failed to install")
+		}
 
-	return diags
-}
-
-func resourceSiteRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	log.Printf("[INFO] [LARAVELFORGE:resourceSiteRead] Start")
-	c := m.(*lf.Client)
-
-	var diags diag.Diagnostics
-
-	serverId := d.Get("server_id").(string)
-	siteId := d.Id()
-
-	site, err := c.GetSite(serverId, siteId)
-	log.Printf("[INFO] [LARAVELFORGE:resourceSiteRead] ID: %s Site: %#v", siteId, site)
+		return s.Status != "creating" && s.Status != "installing", nil
+	})
 	if err != nil {
-		d.SetId("")
+		return diag.Errorf("Unable to create site: %s", err)
+	}
+
+	if diags := syncDomains(client, d); diags.HasError() {
 		return diags
 	}
 
-	d.SetId(strconv.Itoa(site.ID))
+	return resourceSiteRead(ctx, d, m)
+}
 
-	d.Set("name", site.Name)
-	d.Set("username", site.Username)
-	d.Set("directory", site.Directory)
+func resourceSiteRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	c := m.(*lf.Client)
+
+	site, err := c.GetSite(d.Id())
+	if err != nil {
+		if lf.IsNotFound(err) {
+			d.SetId("")
+
+			return nil
+		}
+		return diag.FromErr(err)
+	}
+
+	d.SetId(site.Id)
+
+	d.Set("username", site.User)
 	d.Set("status", site.Status)
-	d.Set("wildcards", site.Wildcards)
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceSiteRead] End")
+	// Forge may normalize the leading slash of the directory.
+	if strings.Trim(site.WebDirectory, "/") != strings.Trim(d.Get("directory").(string), "/") {
+		d.Set("directory", site.WebDirectory)
+	}
 
-	return diags
+	if site.Wildcards != nil {
+		d.Set("wildcards", *site.Wildcards)
+	}
+
+	return nil
 }
 
 func resourceSiteUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
@@ -135,27 +145,20 @@ func resourceSiteUpdate(ctx context.Context, d *schema.ResourceData, m interface
 	siteID := d.Id()
 	serverID := d.Get("server_id").(string)
 
-	if d.HasChanges("domain", "directory", "aliases", "wildcards") {
+	if d.HasChanges("directory", "php_version") {
 		siteUpdates := lf.SiteUpdateRequest{
-			Name:      d.Get("domain").(string),
-			Directory: d.Get("directory").(string),
-			Aliases:   d.Get("aliases").([]interface{}),
-			Wildcards: d.Get("wildcards").(bool),
+			Directory:  d.Get("directory").(string),
+			PhpVersion: d.Get("php_version").(string),
 		}
 
-		_, err := client.UpdateSite(serverID, siteID, siteUpdates)
-		if err != nil {
-			return err
+		if err := client.UpdateSite(serverID, siteID, siteUpdates); err != nil {
+			return diag.FromErr(err)
 		}
 	}
 
-	if d.HasChange("php_version") {
-		versionUpdate := lf.SiteUpdatePhpVersion{
-			Version: d.Get("php_version").(string),
-		}
-		_, err := client.UpdateSitePhpVersion(serverID, siteID, versionUpdate)
-		if err != nil {
-			return err
+	if d.HasChanges("aliases", "wildcards") {
+		if diags := syncDomains(client, d); diags.HasError() {
+			return diags
 		}
 	}
 
@@ -165,16 +168,65 @@ func resourceSiteUpdate(ctx context.Context, d *schema.ResourceData, m interface
 func resourceSiteDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	siteId := d.Id()
-
-	err := c.DeleteSite(d.Get("server_id").(string), siteId)
-	if err != nil {
+	if err := c.DeleteSite(d.Get("server_id").(string), d.Id()); err != nil && !lf.IsNotFound(err) {
 		return diag.FromErr(err)
 	}
 
 	d.SetId("")
 
-	return diags
+	return nil
+}
+
+// syncDomains makes the aliases and the wildcard setting of the site's domains
+// match the configuration.
+func syncDomains(client *lf.Client, d *schema.ResourceData) diag.Diagnostics {
+	serverId := d.Get("server_id").(string)
+	siteId := d.Id()
+	primary := d.Get("domain").(string)
+	wildcards := d.Get("wildcards").(bool)
+
+	desired := map[string]bool{}
+	var aliases []string
+	for _, alias := range d.Get("aliases").([]interface{}) {
+		name, ok := alias.(string)
+		if !ok || name == "" || name == primary || desired[name] {
+			continue
+		}
+		desired[name] = true
+		aliases = append(aliases, name)
+	}
+
+	existing, err := client.ListDomains(serverId, siteId)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	present := map[string]bool{}
+	for _, domain := range existing {
+		present[domain.Name] = true
+
+		if domain.Type == "alias" && !desired[domain.Name] {
+			if err := client.DeleteDomain(serverId, siteId, domain.Id); err != nil && !lf.IsNotFound(err) {
+				return diag.FromErr(err)
+			}
+			continue
+		}
+
+		if domain.AllowWildcardSubdomains != wildcards {
+			if err := client.UpdateDomain(serverId, siteId, domain.Id, domain.WwwRedirectType, wildcards); err != nil {
+				return diag.FromErr(err)
+			}
+		}
+	}
+
+	for _, alias := range aliases {
+		if present[alias] {
+			continue
+		}
+		if err := client.CreateDomain(serverId, siteId, alias, wildcards); err != nil {
+			return diag.Errorf("Unable to add alias %s: %s", alias, err)
+		}
+	}
+
+	return nil
 }

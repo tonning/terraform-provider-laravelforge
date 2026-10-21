@@ -28,10 +28,13 @@ description: |-
 - `credential_id` (String)
 - `ip_address` (String)
 - `network` (List of String) An array of server IDs that the server should be able to connect to.
+- `database_type` (String)
 - `ocean2_vpc_uuid` (String)
 - `opcache` (Boolean)
 - `private_ip_address` (String)
 - `region` (String)
+- `size` (String) The size of the server. Not used for custom servers.
+- `ssh_port` (Number) The SSH port of a custom server.
 
 ### Read-Only
 

@@ -2,11 +2,13 @@ package laravelforge
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
+	"fmt"
+	"time"
+
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"log"
-	"strconv"
-	"time"
 	lf "tonning/terraform-provider-laravelforge/client"
 )
 
@@ -78,10 +80,10 @@ func resourceDaemon() *schema.Resource {
 func resourceDaemonCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*lf.Client)
 
-	var diags diag.Diagnostics
+	serverId := d.Get("server_id").(string)
 
-	log.Printf("[DEBUG] Daemon creation")
 	opts := &lf.CreateDaemonRequest{
+		Name:         daemonName(d),
 		Command:      d.Get("command").(string),
 		Directory:    d.Get("directory").(string),
 		User:         d.Get("user").(string),
@@ -91,96 +93,75 @@ func resourceDaemonCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		Stopsignal:   d.Get("stop_signal").(string),
 	}
 
-	log.Printf("[DEBUG] Daemon configuration: %#v", opts)
-
-	serverId := d.Get("server_id").(string)
-
 	daemon, err := client.CreateDaemon(serverId, opts)
-	daemonId := daemon.Id
-
-	attempts := 0
-
-	// Wait for status to be other than "installing".
-	for shouldCheck := true; shouldCheck; shouldCheck = daemon.Status == "installing" {
-		daemon, err := client.GetDaemon(serverId, strconv.Itoa(daemonId))
-		log.Printf("[INFO] [LARAVELFORGE] Daemon waiting: %#v", daemon)
-
-		if err != nil {
-			d.SetId("")
-			return diag.FromErr(err)
-		}
-
-		if daemon.Status == "installed" {
-			break
-		}
-
-		if attempts > 10 {
-			return diag.Errorf("Unable to add daemon. Timeout.")
-		}
-
-		time.Sleep(time.Second * 5)
-		attempts++
-	}
-
 	if err != nil {
-		return err
+		return diag.FromErr(err)
+	}
+	if daemon.Id == "" {
+		return diag.Errorf("Daemon not created")
 	}
 
-	log.Printf("[INFO] [LARAVELFORGE] Daemon response: %#v", daemon)
-	d.SetId(strconv.Itoa(daemon.Id))
-	log.Printf("[INFO] [LARAVELFORGE] Daemon ID: %s", strconv.Itoa(daemon.Id))
+	d.SetId(daemon.Id)
 
-	resourceDaemonRead(ctx, d, m)
+	err = lf.WaitUntil(5*time.Minute, func() (bool, error) {
+		current, err := client.GetDaemon(serverId, daemon.Id)
+		if err != nil {
+			return false, err
+		}
 
-	return diags
+		return current.Status != "installing", nil
+	})
+	if err != nil {
+		return diag.Errorf("Unable to add daemon: %s", err)
+	}
+
+	return resourceDaemonRead(ctx, d, m)
+}
+
+// daemonName derives a stable name, as the Forge API requires one.
+func daemonName(d *schema.ResourceData) string {
+	sum := sha1.Sum([]byte(fmt.Sprintf("%s|%s|%s", d.Get("command"), d.Get("user"), d.Get("directory"))))
+
+	return "terraform-" + hex.EncodeToString(sum[:])[:8]
 }
 
 func resourceDaemonRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	log.Printf("[INFO] [LARAVELFORGE:resourceDaemonRead] Start")
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	serverId := d.Get("server_id").(string)
-	daemonId := d.Id()
-
-	daemon, err := c.GetDaemon(serverId, daemonId)
-	log.Printf("[INFO] [LARAVELFORGE:resourceDaemonRead] ID: %s Daemon: %#v", daemonId, daemon)
+	daemon, err := c.GetDaemon(d.Get("server_id").(string), d.Id())
 	if err != nil {
-		d.SetId("")
-		return diags
+		if lf.IsNotFound(err) {
+			d.SetId("")
+
+			return nil
+		}
+		return diag.FromErr(err)
 	}
 
-	d.SetId(strconv.Itoa(daemon.Id))
+	d.SetId(daemon.Id)
 
 	d.Set("command", daemon.Command)
-	d.Set("directory", daemon.Directory)
 	d.Set("user", daemon.User)
 	d.Set("processes", daemon.Processes)
-	d.Set("start_secs", daemon.Startsecs)
-	d.Set("stop_wait_secs", daemon.Stopwaitsecs)
-	d.Set("stop_signal", daemon.Stopsignal)
 	d.Set("status", daemon.Status)
 	d.Set("created_at", daemon.CreatedAt)
 
-	log.Printf("[INFO] [LARAVELFORGE:resourceDaemonRead] End")
+	// Forge may fill in a default directory when none was given.
+	if d.Get("directory").(string) != "" {
+		d.Set("directory", daemon.Directory)
+	}
 
-	return diags
+	return nil
 }
 
 func resourceDaemonDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	c := m.(*lf.Client)
 
-	var diags diag.Diagnostics
-
-	daemonId := d.Id()
-
-	err := c.DeleteDaemon(d.Get("server_id").(string), daemonId)
-	if err != nil {
+	if err := c.DeleteDaemon(d.Get("server_id").(string), d.Id()); err != nil && !lf.IsNotFound(err) {
 		return diag.FromErr(err)
 	}
 
 	d.SetId("")
 
-	return diags
+	return nil
 }

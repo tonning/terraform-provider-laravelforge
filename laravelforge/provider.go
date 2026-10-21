@@ -17,6 +17,12 @@ func Provider() *schema.Provider {
 				Required:    true,
 				DefaultFunc: schema.EnvDefaultFunc("LARAVELFORGE_TOKEN", nil),
 			},
+			"organization": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				DefaultFunc: schema.EnvDefaultFunc("LARAVELFORGE_ORGANIZATION", nil),
+				Description: "The slug of the Laravel Forge organization. Defaults to the only organization the token has access to.",
+			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"laravelforge_server":         resourceServer(),
@@ -37,16 +43,17 @@ func Provider() *schema.Provider {
 
 func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	token := d.Get("token").(string)
+	organization := d.Get("organization").(string)
 
 	// Warning or errors can be collected in a slice type
 	var diags diag.Diagnostics
 
-	c, err := client.NewClient(nil, &token)
+	c, err := client.NewClient(nil, &token, &organization)
 	if err != nil {
 		diags = append(diags, diag.Diagnostic{
 			Severity: diag.Error,
 			Summary:  "Unable to create Laravel Forge client",
-			Detail:   "Unable to auth user for authenticated Laravel Forge client",
+			Detail:   err.Error(),
 		})
 		return nil, diags
 	}
