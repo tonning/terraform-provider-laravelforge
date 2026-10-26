@@ -7,7 +7,7 @@ import (
 )
 
 type Key struct {
-	Id     string
+	Id     string `json:"-"`
 	Name   string `json:"name"`
 	User   string `json:"user"`
 	Status string `json:"status"`

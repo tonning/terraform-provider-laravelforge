@@ -6,7 +6,7 @@ import (
 )
 
 type RedirectRule struct {
-	Id        string
+	Id        string `json:"-"`
 	From      string `json:"from"`
 	To        string `json:"to"`
 	Type      string `json:"type"`

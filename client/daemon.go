@@ -5,7 +5,7 @@ import (
 )
 
 type Daemon struct {
-	Id        string
+	Id        string `json:"-"`
 	Command   string `json:"command"`
 	User      string `json:"user"`
 	Directory string `json:"directory"`

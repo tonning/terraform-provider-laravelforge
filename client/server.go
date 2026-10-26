@@ -6,7 +6,7 @@ import (
 )
 
 type Server struct {
-	Id               string
+	Id               string     `json:"-"`
 	CredentialId     FlexString `json:"credential_id"`
 	Name             string     `json:"name"`
 	Type             string     `json:"type"`

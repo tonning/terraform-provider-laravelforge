@@ -245,3 +245,31 @@ func TestCertificateLookupAcrossDomains(t *testing.T) {
 		t.Fatalf("unexpected certificate %#v", certificate)
 	}
 }
+
+func TestNumericAttributeIdsDoNotClashWithResourceIds(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request, rec recordedRequest) {
+		switch {
+		case strings.HasSuffix(rec.Path, "/servers/863132"):
+			fmt.Fprint(w, `{"data":{"id":"863132","type":"servers","attributes":{"id":863132,"name":"web-ava","ssh_port":22,"credential_id":null}}}`)
+		case strings.HasSuffix(rec.Path, "/sites/9"):
+			fmt.Fprint(w, `{"data":{"id":"9","type":"sites","attributes":{"id":9,"name":"example.com","status":"installed"}}}`)
+		default:
+			fmt.Fprint(w, `{"data":[{"id":"3","attributes":{"id":3,"name":"k"}}],"meta":{}}`)
+		}
+	})
+
+	server, err := c.GetServer("863132")
+	if err != nil || server.Id != "863132" || server.Name != "web-ava" {
+		t.Fatalf("server=%#v err=%v", server, err)
+	}
+
+	site, err := c.GetSite("9")
+	if err != nil || site.Id != "9" {
+		t.Fatalf("site=%#v err=%v", site, err)
+	}
+
+	keys, err := c.ListKeys("1")
+	if err != nil || len(keys) != 1 || keys[0].Id != "3" {
+		t.Fatalf("keys=%#v err=%v", keys, err)
+	}
+}

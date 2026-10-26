@@ -6,8 +6,8 @@ import (
 )
 
 type Certificate struct {
-	Id            string
-	DomainId      string
+	Id            string `json:"-"`
+	DomainId      string `json:"-"`
 	Type          string `json:"type"`
 	RequestStatus string `json:"request_status"`
 	Status        string `json:"status"`

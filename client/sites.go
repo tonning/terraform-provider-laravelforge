@@ -5,7 +5,7 @@ import (
 )
 
 type Site struct {
-	Id            string
+	Id            string `json:"-"`
 	Name          string `json:"name"`
 	Status        string `json:"status"`
 	User          string `json:"user"`
@@ -29,7 +29,7 @@ type SiteUpdateRequest struct {
 }
 
 type Domain struct {
-	Id                      string
+	Id                      string `json:"-"`
 	Name                    string `json:"name"`
 	Type                    string `json:"type"`
 	Status                  string `json:"status"`

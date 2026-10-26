@@ -5,7 +5,7 @@ import (
 )
 
 type ScheduledJob struct {
-	Id        string
+	Id        string `json:"-"`
 	Name      string `json:"name"`
 	Command   string `json:"command"`
 	User      string `json:"user"`
