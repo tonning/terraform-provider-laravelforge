@@ -128,8 +128,9 @@ func resourceSiteRead(ctx context.Context, d *schema.ResourceData, m interface{}
 	d.Set("username", site.User)
 	d.Set("status", site.Status)
 
-	// Forge may normalize the leading slash of the directory.
-	if strings.Trim(site.WebDirectory, "/") != strings.Trim(d.Get("directory").(string), "/") {
+	// Forge reports the absolute path, so treat a matching suffix as unchanged.
+	configured := strings.Trim(d.Get("directory").(string), "/")
+	if configured == "" || !strings.HasSuffix(strings.Trim(site.WebDirectory, "/"), configured) {
 		d.Set("directory", site.WebDirectory)
 	}
 
