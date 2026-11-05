@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -40,6 +41,7 @@ func newTestClient(t *testing.T, handler func(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.MinRequestInterval = 0
 
 	return c, &requests
 }
@@ -271,5 +273,27 @@ func TestNumericAttributeIdsDoNotClashWithResourceIds(t *testing.T) {
 	keys, err := c.ListKeys("1")
 	if err != nil || len(keys) != 1 || keys[0].Id != "3" {
 		t.Fatalf("keys=%#v err=%v", keys, err)
+	}
+}
+
+func TestThrottleSpacesConcurrentRequests(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request, rec recordedRequest) {
+		fmt.Fprint(w, `{"data":{"id":"1","attributes":{}}}`)
+	})
+	c.MinRequestInterval = 50 * time.Millisecond
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = c.GetServer("1")
+		}()
+	}
+	wg.Wait()
+
+	if elapsed := time.Since(start); elapsed < 240*time.Millisecond {
+		t.Fatalf("requests were not spaced, took %s", elapsed)
 	}
 }

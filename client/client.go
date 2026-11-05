@@ -11,19 +11,78 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 // HostURL - Default Laravel Forge API URL
 const HostURL string = "https://forge.laravel.com/api"
 
-const maxRateLimitRetries = 5
+const maxRateLimitRetries = 10
+
+// DefaultMinRequestInterval keeps the client below Forge's limit of 60 requests per minute.
+const DefaultMinRequestInterval = 1200 * time.Millisecond
 
 type Client struct {
 	HostURL      string
 	HTTPClient   *http.Client
 	Token        string
 	Organization string
+
+	// MinRequestInterval is the minimum delay between two requests, shared by
+	// all concurrent callers. Zero disables throttling.
+	MinRequestInterval time.Duration
+
+	mu       sync.Mutex
+	nextSlot time.Time
+}
+
+// throttle blocks until the caller may send a request.
+func (c *Client) throttle() {
+	if c.MinRequestInterval <= 0 {
+		return
+	}
+
+	c.mu.Lock()
+	now := time.Now()
+	slot := c.nextSlot
+	if slot.Before(now) {
+		slot = now
+	}
+	c.nextSlot = slot.Add(c.MinRequestInterval)
+	c.mu.Unlock()
+
+	if d := time.Until(slot); d > 0 {
+		time.Sleep(d)
+	}
+}
+
+// pauseUntil delays all callers, used after a rate limit response.
+func (c *Client) pauseUntil(t time.Time) {
+	c.mu.Lock()
+	if t.After(c.nextSlot) {
+		c.nextSlot = t
+	}
+	c.mu.Unlock()
+}
+
+// retryDelay derives how long to wait after a 429 response.
+func retryDelay(res *http.Response, attempt int) time.Duration {
+	if s, err := strconv.Atoi(res.Header.Get("Retry-After")); err == nil && s >= 0 {
+		return time.Duration(s)*time.Second + time.Second
+	}
+	if s, err := strconv.ParseInt(res.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+		if d := time.Until(time.Unix(s, 0)); d > 0 && d < 5*time.Minute {
+			return d + time.Second
+		}
+	}
+
+	d := 15 * time.Second << uint(attempt)
+	if d > 2*time.Minute {
+		d = 2 * time.Minute
+	}
+
+	return d
 }
 
 // APIError is returned for every non 2xx response.
@@ -47,9 +106,10 @@ func IsNotFound(err error) bool {
 // organization is used.
 func NewClient(host, token, organization *string) (*Client, error) {
 	c := Client{
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
-		HostURL:    HostURL,
-		Token:      *token,
+		HTTPClient:         &http.Client{Timeout: 30 * time.Second},
+		HostURL:            HostURL,
+		Token:              *token,
+		MinRequestInterval: DefaultMinRequestInterval,
 	}
 
 	if host != nil && *host != "" {
@@ -128,6 +188,7 @@ func (c *Client) do(method, endpoint string, payload interface{}) ([]byte, error
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Content-Type", "application/json")
 
+		c.throttle()
 		res, err := c.HTTPClient.Do(req)
 		if err != nil {
 			return nil, err
@@ -140,12 +201,9 @@ func (c *Client) do(method, endpoint string, payload interface{}) ([]byte, error
 		}
 
 		if res.StatusCode == http.StatusTooManyRequests && attempt < maxRateLimitRetries {
-			wait := 30 * time.Second
-			if s, err := strconv.Atoi(res.Header.Get("Retry-After")); err == nil && s >= 0 {
-				wait = time.Duration(s) * time.Second
-			}
+			wait := retryDelay(res, attempt)
 			log.Printf("[INFO] [LARAVELFORGE] Rate limited, retrying in %s", wait)
-			time.Sleep(wait)
+			c.pauseUntil(time.Now().Add(wait))
 			continue
 		}
 
