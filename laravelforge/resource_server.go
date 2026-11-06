@@ -179,7 +179,9 @@ func resourceServerCreate(ctx context.Context, d *schema.ResourceData, m interfa
 		}
 	}
 
-	if d.Get("opcache").(bool) {
+	// A custom server is not provisioned yet, so enabling OPcache now would fail
+	// in Forge. The next apply enables it once the state reports it as disabled.
+	if d.Get("opcache").(bool) && opts.Provider != "custom" {
 		if err := client.EnableOpcache(server.Id); err != nil {
 			diags = append(diags, diag.Diagnostic{
 				Severity: diag.Warning,
@@ -213,6 +215,10 @@ func resourceServerRead(ctx context.Context, d *schema.ResourceData, m interface
 	d.Set("ip_address", server.IpAddress)
 	d.Set("private_ip_address", server.PrivateIpAddress)
 	d.Set("is_ready", server.IsReady)
+
+	// OPcache can only be enabled once a custom server has been provisioned, so
+	// report the real state and let the next apply enable it if it is missing.
+	d.Set("opcache", server.OpcacheStatus == "enabled" || server.OpcacheStatus == "enabling")
 
 	// Forge may report these in a different notation than the configuration.
 	// Only fill them in when unknown, i.e. after an import.
