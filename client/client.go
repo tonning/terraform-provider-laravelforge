@@ -222,6 +222,7 @@ type resource struct {
 	ID         string          `json:"id"`
 	Type       string          `json:"type"`
 	Attributes json.RawMessage `json:"attributes"`
+	Meta       json.RawMessage `json:"meta"`
 }
 
 type singleEnvelope struct {
@@ -254,7 +255,14 @@ func decodeSingle(body []byte, attrs interface{}) (string, json.RawMessage, erro
 		}
 	}
 
-	return env.Data.ID, env.Meta, nil
+	// Forge returns one-time values such as the provision command in the
+	// resource's own meta; older responses carried them at the top level.
+	meta := env.Data.Meta
+	if len(meta) == 0 {
+		meta = env.Meta
+	}
+
+	return env.Data.ID, meta, nil
 }
 
 func unmarshalAttributes(r resource, attrs interface{}) error {

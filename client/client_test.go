@@ -121,6 +121,21 @@ func TestCreateServerReadsProvisioningFromMeta(t *testing.T) {
 	}
 }
 
+func TestCreateServerReadsProvisioningFromResourceMeta(t *testing.T) {
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request, rec recordedRequest) {
+		w.WriteHeader(http.StatusAccepted)
+		fmt.Fprint(w, `{"data":{"id":"7","type":"servers","attributes":{"credential_id":null,"ssh_port":22},"meta":{"provision_command":"cmd","sudo_password":"pw"}}}`)
+	})
+
+	server, err := c.CreateServer(&ServerCreateRequest{Name: "x", Provider: "custom", Type: "web", IpAddress: "1.2.3.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if server.ProvisionCommand != "cmd" || server.SudoPassword != "pw" {
+		t.Fatalf("unexpected server %#v", server)
+	}
+}
+
 func TestNotFoundIsDetectable(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request, rec recordedRequest) {
 		w.WriteHeader(http.StatusNotFound)
